@@ -164,9 +164,8 @@ fun SimpleWorld(s: WorldState, a: WorldActions) {
             Spacer(Modifier.weight(1f))
 
             // the sphere
-            Box(Modifier.size(250.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { tapSphere() }, contentAlignment = Alignment.Center) {
-                Sphere(who.c, who.cLight, who.cDark, swell, mic == Mic.LISTENING, level)
-            }
+            // your companion: tap to talk, drag it around
+            Sprite(who, level, mic == Mic.LISTENING, 300.dp) { tapSphere() }
             Spacer(Modifier.height(18.dp))
             Text(who.title.uppercase(), style = sEyebrow.copy(color = who.cLight.copy(alpha = .8f)))
             Spacer(Modifier.height(8.dp))

@@ -175,6 +175,7 @@ fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, co
     val actions = remember {
         object : WorldActions {
             override fun done(q: Quest) {
+                if (!q.done) com.mwooten.chime.worlds.Bell.strike(ctx, companion)
                 QuestStore.setDone(ctx, q.id, !q.done)
                 if (!q.done) say("Done: ${q.text}")
             }
@@ -244,7 +245,7 @@ fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, co
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Box(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(companion.color)).clickable {
-                            letter = null; say("Saved. ${companion.title} will remind you.")
+                            letter = null; com.mwooten.chime.worlds.Bell.strike(ctx, companion); say("Saved. ${companion.title} will remind you.")
                         }.padding(14.dp), contentAlignment = Alignment.Center) {
                             Text("Confirm", style = T.body.copy(fontFamily = Fonts.nunito, fontWeight = FontWeight.W800, fontSize = 16.sp, color = Color.White))
                         }
