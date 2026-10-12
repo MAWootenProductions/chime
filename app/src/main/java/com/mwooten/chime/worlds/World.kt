@@ -1,6 +1,9 @@
 package com.mwooten.chime.worlds
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import com.mwooten.chime.data.Companion
 import com.mwooten.chime.data.Quest
 import com.mwooten.chime.data.Shelf
@@ -104,6 +107,8 @@ enum class WorldId(val title: String, val blurb: String, val category: Category,
 /** Draws whichever world is selected. Each world fills the whole screen and handles its own system-bar padding. */
 @Composable
 fun WorldHost(id: WorldId, s: WorldState, a: WorldActions) {
+    // every mode keeps your character: Simple draws it big; the others carry it in the corner
+    Box(Modifier.fillMaxSize()) {
     when (id) {
         WorldId.SIMPLE -> SimpleWorld(s, a)
         WorldId.PLAIN -> PlainWorld(s, a)
@@ -136,5 +141,7 @@ fun WorldHost(id: WorldId, s: WorldState, a: WorldActions) {
         WorldId.AIRPLANE -> AirplaneWorld(s, a)
         WorldId.RAINFOREST -> RainforestWorld(s, a)
         WorldId.NIGHT -> NightWorld(s, a)
+    }
+    if (id != WorldId.SIMPLE) Pocket(s, a)
     }
 }

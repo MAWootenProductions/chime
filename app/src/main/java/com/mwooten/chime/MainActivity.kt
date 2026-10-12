@@ -258,6 +258,8 @@ fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, co
                             Text("Cancel", style = T.body.copy(fontFamily = Fonts.nunito, fontWeight = FontWeight.W800, fontSize = 16.sp, color = ink))
                         }
                     }
+                    if (adds.size == 1) Text("Edit name or time ›", style = T.body.copy(fontFamily = Fonts.nunito, fontWeight = FontWeight.W700, fontSize = 14.sp, color = Color(companion.dark)),
+                        modifier = Modifier.clickable { sheetId = adds.first().id; letter = null }.padding(vertical = 4.dp))
                 } else {
                     Text(l?.text ?: "", style = T.body.copy(fontFamily = Fonts.fraunces, fontWeight = FontWeight.W600, fontSize = 20.sp, lineHeight = 27.sp, color = ink))
                     if (kind != "thinking") FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -275,7 +277,7 @@ fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, co
                 if (!thinking) SpillInput(
                     onSpill = { text -> talk(text, l?.questId) },
                     textStyle = T.body.copy(fontFamily = Fonts.nunito, fontWeight = FontWeight.W600, fontSize = 16.sp, color = Color(0xFF1B1A17)),
-                    placeholder = if (l?.kind == "confirm") "Something off? Say the fix…" else "Reply to ${companion.title}…",
+                    placeholder = if (l?.kind == "confirm") "Wrong time? Type the fix, like “today 3pm”" else "Reply to ${companion.title}…",
                     placeholderColor = Color(0xFF8A857A),
                     cursor = Color(companion.color),
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color.White).padding(horizontal = 14.dp, vertical = 12.dp),
@@ -289,7 +291,11 @@ fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, co
         if (sq != null) QuestSheet(
             q = sq,
             onDismiss = { sheetId = null },
-            onRename = { QuestStore.upsert(ctx, sq.copy(text = it)) },
+            onRename = { typed ->
+                // typing a time into the name fixes the time too: "Jury letter tday 3pm"
+                val p = com.mwooten.chime.data.Parser.parse(typed)
+                QuestStore.upsert(ctx, if (p.due != null && p.title.isNotBlank()) sq.copy(text = p.title, due = p.due, allDay = p.allDay, kind = p.kind) else sq.copy(text = typed))
+            },
             onToggle = { actions.done(sq) },
             onSnooze = { actions.snooze(sq, 60) },
             onTomorrow = {

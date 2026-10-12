@@ -18,7 +18,44 @@ object Parser {
         "sat" to DayOfWeek.SATURDAY,
     )
 
-    fun parse(raw: String, nowMs: Long = System.currentTimeMillis()): Parsed {
+    /** Date/time words we'll forgive typos in. Months are left out: "match" is too close to "march". */
+    private val VOCAB = listOf("today", "tonight", "tomorrow", "morning", "afternoon", "evening", "noon",
+        "midnight", "weekend", "before", "until", "monday", "tuesday", "wednesday", "thursday", "friday",
+        "saturday", "sunday", "minutes", "hours")
+    private val SLANG = mapOf("2day" to "today", "2nite" to "tonight", "tonite" to "tonight", "2night" to "tonight",
+        "2morrow" to "tomorrow", "2moro" to "tomorrow", "tmw" to "tomorrow", "tmrw" to "tomorrow", "tmr" to "tomorrow",
+        "tomoz" to "tomorrow", "arvo" to "afternoon", "wknd" to "weekend", "b4" to "before", "til" to "until")
+    /** Real words that sit one letter away from a date word and must stay as typed. */
+    private val KEEP = setOf("neon", "noun", "nook", "none", "noone", "noor", "noob", "nono", "noona", "norn", "toady",
+        "todd", "toddy", "todas", "hour", "hors", "horus", "minute", "minuses", "minuets", "minutos", "mourning",
+        "moaning", "mooning", "mcknight", "sundae", "sundry", "sunway", "sunray", "util", "weekends", "afternoons",
+        "tuesdays", "wednesdays", "thursdays", "fridays", "mondays", "sundays", "saturdays", "evenings", "mornings")
+
+    /** Optimal string alignment distance (counts a swapped pair like "todya" as one slip). */
+    private fun dist(a: String, b: String): Int {
+        val d = Array(a.length + 1) { IntArray(b.length + 1) }
+        for (i in 0..a.length) d[i][0] = i
+        for (j in 0..b.length) d[0][j] = j
+        for (i in 1..a.length) for (j in 1..b.length) {
+            val c = if (a[i - 1] == b[j - 1]) 0 else 1
+            d[i][j] = minOf(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + c)
+            if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) d[i][j] = minOf(d[i][j], d[i - 2][j - 2] + 1)
+        }
+        return d[a.length][b.length]
+    }
+
+    /** "respond to jury letter tdoay before nooon" → "respond to jury letter today before noon". */
+    fun forgive(raw: String): String = Regex("[A-Za-z0-9']+").replace(raw) { m ->
+        val w = m.value; val lw = w.lowercase()
+        SLANG[lw]?.let { return@replace it }
+        if (lw.length < 4 || lw in VOCAB || lw in KEEP || !lw.all { it.isLetter() }) return@replace w
+        val best = VOCAB.filter { it[0] == lw[0] }.map { it to dist(lw, it) }.minByOrNull { it.second } ?: return@replace w
+        val allowed = if (best.first.length >= 8 && lw.length >= 7) 2 else 1
+        if (best.second in 1..allowed) best.first else w
+    }
+
+    fun parse(raw0: String, nowMs: Long = System.currentTimeMillis()): Parsed {
+        val raw = forgive(raw0)
         val now: LocalDateTime = Time.ldt(nowMs)
         val today: LocalDate = now.toLocalDate()
         var s = " " + raw.trim().replace(Regex("\\s+"), " ") + " "

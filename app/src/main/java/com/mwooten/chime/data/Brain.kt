@@ -193,6 +193,26 @@ object Brain {
             QuestStore.setDone(ctx, about.id, true)
             return Result(say("Lovely. $name is done.", "$name, done. I'll alert the press.", "$name: DEMOLISHED. Victory lap!", "You did it! I knew you would. Sorry I doubted. I didn't doubt.", "$name DONE. THAT'S WHAT I'M TALKING ABOUT."), true)
         }
+        // a fix for the thing we're talking about: "today at 3", "no, by noon", "make it friday", "call it jury letter"
+        if (about != null && !Regex("(not today|don'?t worry|skip|another day|leave it|^(later|snooze|cancel|never ?mind|forget it|drop it|delete|done|did it|finished))", I).containsMatchIn(t)) {
+            val lead = Regex("^(no,?|nope,?|actually,?|wait,?|i meant|i mean|make it|change it to|change to|should be|it's|its|it is|move it to|set it (for|to))\\s+", I)
+            val body = raw.trim().replace(lead, "")
+            val rn = Regex("^(?:rename(?: it)? to|call it|name it|title)\\s+(.+)$", I).find(body)
+            if (rn != null) {
+                val newName = rn.groupValues[1].trim().trimEnd('.', '!')
+                val p = Parser.parse(newName)
+                val nm = p.title.ifBlank { newName }.replaceFirstChar { it.uppercase() }
+                QuestStore.upsert(ctx, if (p.due != null) about.copy(text = nm, due = p.due, allDay = p.allDay, kind = p.kind) else about.copy(text = nm))
+                return Result(say("Renamed it “$nm”.", "“$nm” it is. Much better.", "New name: “$nm”! Fancy.", "Okay, “$nm”. Sorry I got it wrong.", "“$nm”. FIXED."), true)
+            }
+            val p = Parser.parse(body)
+            val leftover = p.title.split(" ").count { it.isNotBlank() }
+            if (p.due != null && (leftover <= 1 || body.length < raw.trim().length)) {
+                QuestStore.upsert(ctx, about.copy(due = p.due, allDay = p.allDay, kind = p.kind, done = false))
+                val lbl = Time.dueLabel(p.due, p.allDay, p.kind).lowercase()
+                return Result(say("Fixed. $name is now $lbl.", "Fixed: $name, $lbl. Typos happen.", "$name now lives at $lbl!", "Sorry about that. $name is $lbl now.", "FIXED. $name. $lbl."), true)
+            }
+        }
         if (about != null && Regex("(not today|don'?t worry about (it|this|that)|tomorrow|skip (it|today)|another day|leave it)", I).containsMatchIn(t)) {
             val tomorrow = LocalDate.now(Time.zone).plusDays(1)
             val d = about.due

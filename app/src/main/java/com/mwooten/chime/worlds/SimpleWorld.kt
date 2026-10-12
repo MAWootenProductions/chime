@@ -104,12 +104,35 @@ fun SimpleWorld(s: WorldState, a: WorldActions) {
     var menu by remember { mutableStateOf(false) }
     var howTo by remember { mutableStateOf(!Settings.raw(ctx).getBoolean("howto_seen", false)) }
 
-    val recognizer = remember { if (SpeechRecognizer.isRecognitionAvailable(ctx)) SpeechRecognizer.createSpeechRecognizer(ctx) else null }
+    // A fresh recognizer per tap: reusing one gets stuck "busy" on newer Pixels. If the in-app
+    // recognizer fails for any reason other than "didn't hear words", fall back to Google's own
+    // voice-typing popup, which works on every phone with the Google app.
+    var recognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+    var micNote by remember { mutableStateOf("") }
     DisposableEffect(Unit) { onDispose { recognizer?.destroy() } }
 
+    fun speechIntent() = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+        .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        .putExtra(RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault().toLanguageTag())
+        .putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.packageName)
+        .putExtra(RecognizerIntent.EXTRA_PROMPT, "What do you need to do?")
+
+    val popup = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        level = 0f
+        val t = res.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull().orEmpty()
+        if (t.isNotBlank()) { heard = t; mic = Mic.HEARD; micNote = ""; a.spill(t) } else mic = Mic.IDLE
+    }
+    fun openPopup() {
+        try { mic = Mic.IDLE; popup.launch(speechIntent()) }
+        catch (e: Exception) { mic = Mic.ERROR; micNote = "Voice isn't available on this phone. Type instead."; typing = true }
+    }
+
     fun listen() {
-        val r = recognizer ?: run { typing = true; return }
-        heard = ""; level = 0f; mic = Mic.LISTENING
+        recognizer?.destroy(); recognizer = null
+        if (!SpeechRecognizer.isRecognitionAvailable(ctx)) { openPopup(); return }
+        val r = try { SpeechRecognizer.createSpeechRecognizer(ctx) } catch (e: Exception) { null } ?: run { openPopup(); return }
+        recognizer = r
+        heard = ""; level = 0f; mic = Mic.LISTENING; micNote = ""
         r.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
@@ -118,10 +141,15 @@ fun SimpleWorld(s: WorldState, a: WorldActions) {
             override fun onEndOfSpeech() { level = 0f }
             override fun onError(error: Int) {
                 level = 0f
-                mic = if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) Mic.ERROR else Mic.ERROR
+                if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                    if (heard.isNotBlank()) { mic = Mic.HEARD; a.spill(heard) } else mic = Mic.ERROR
+                } else {
+                    micNote = "Mic hiccup (code $error), so I opened voice typing."
+                    openPopup()
+                }
             }
             override fun onResults(results: Bundle?) {
-                val t = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+                val t = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty().ifBlank { heard }
                 level = 0f
                 if (t.isNotBlank()) { heard = t; mic = Mic.HEARD; a.spill(t) } else mic = Mic.ERROR
             }
@@ -130,12 +158,13 @@ fun SimpleWorld(s: WorldState, a: WorldActions) {
             }
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
-        r.startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true))
+        try { r.startListening(speechIntent().putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)) }
+        catch (e: Exception) { openPopup() }
     }
 
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) listen() else typing = true }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) listen() else { mic = Mic.ERROR; micNote = "Chime needs the microphone to hear you. Turn it on in your phone’s Settings › Apps › Chime › Permissions, or type."; typing = true }
+    }
     fun tapSphere() {
         if (mic == Mic.LISTENING) { recognizer?.stopListening(); return }
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) listen()
@@ -177,7 +206,7 @@ fun SimpleWorld(s: WorldState, a: WorldActions) {
                 val line = when (mic) {
                     Mic.LISTENING -> heard.ifBlank { "Listening…" }
                     Mic.HEARD -> "“$heard”"
-                    Mic.ERROR -> "I didn't catch that. Tap and try again."
+                    Mic.ERROR -> micNote.ifBlank { "I didn't catch that. Tap and try again." }
                     Mic.IDLE -> "Tap and tell me what you need to do."
                 }
                 Text(line, style = sVoice.copy(color = if (mic == Mic.IDLE || mic == Mic.ERROR) SInk.copy(alpha = .78f) else SInk),
