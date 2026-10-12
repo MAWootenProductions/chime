@@ -58,7 +58,7 @@ interface WorldActions {
 
 enum class Category(val title: String) {
     START("Start here"), TALK("Talk to me"), GADGETS("Phones and gadgets"), GAMES("Games"),
-    COMPUTERS("Computers and the early web"), PAPER("Paper, sea and sky"),
+    COMPUTERS("Computers and the early web"), PAPER("Sea and sky"),
 }
 
 /** Every mode, in picker order. */
@@ -80,23 +80,14 @@ enum class WorldId(val title: String, val blurb: String, val category: Category,
     DEX("Creature Field Guide", "Seen, not caught", Category.GADGETS, true),
 
     ADVENTURE("Top-Down Adventure", "Deliver it by noon", Category.GAMES, true),
-    QUESTBOARD("Quest Board", "Bounties and ranks", Category.GAMES, true),
     MINES("Minesweeper", "Defuse your day", Category.GAMES, false),
     OVERWORLD("Overworld 64", "Read the sign", Category.GAMES, false),
-    PET("Virtual Pet", "Feed it by finishing", Category.GAMES, false),
 
     DESKTOP98("Retro Desktop", "Not responding since Thursday", Category.COMPUTERS, false),
     PLATINUM("Platinum Desktop", "Alerts and note pads", Category.COMPUTERS, false),
-    ONEBIT("1-bit Paint", "One brush, black and white", Category.COMPUTERS, false),
-    SCREENSAVER("Screensaver", "Flying envelopes", Category.COMPUTERS, true),
     PROFILE("Profile Page", "Your Top 8 quests", Category.COMPUTERS, true),
-    TERMINAL("Terminal", "chime ls today", Category.COMPUTERS, true),
 
-    PIGEON("Carrier Pigeon", "Pigeonholes on a desk", Category.PAPER, false),
-    LETTER("Handwritten Letter", "Ink and a P.S.", Category.PAPER, false),
     BOTTLE("Message in a Bottle", "Before the tide comes in", Category.PAPER, false),
-    AIRPLANE("Paper Airplanes", "Check one", Category.PAPER, false),
-    RAINFOREST("Rainforest", "Vines that drop as time runs out", Category.PAPER, true),
     NIGHT("Night Sky", "Your day as a star chart", Category.PAPER, true);
 
     companion object {
@@ -125,21 +116,12 @@ fun WorldHost(id: WorldId, s: WorldState, a: WorldActions) {
         WorldId.HANDHELD -> HandheldWorld(s, a)
         WorldId.DEX -> DexWorld(s, a)
         WorldId.ADVENTURE -> AdventureWorld(s, a)
-        WorldId.QUESTBOARD -> QuestBoardWorld(s, a)
         WorldId.MINES -> MinesWorld(s, a)
         WorldId.OVERWORLD -> OverworldWorld(s, a)
-        WorldId.PET -> PetWorld(s, a)
         WorldId.DESKTOP98 -> Desktop98World(s, a)
         WorldId.PLATINUM -> PlatinumWorld(s, a)
-        WorldId.ONEBIT -> OneBitWorld(s, a)
-        WorldId.SCREENSAVER -> ScreensaverWorld(s, a)
         WorldId.PROFILE -> ProfileWorld(s, a)
-        WorldId.TERMINAL -> TerminalWorld(s, a)
-        WorldId.PIGEON -> PigeonWorld(s, a)
-        WorldId.LETTER -> LetterWorld(s, a)
         WorldId.BOTTLE -> BottleWorld(s, a)
-        WorldId.AIRPLANE -> AirplaneWorld(s, a)
-        WorldId.RAINFOREST -> RainforestWorld(s, a)
         WorldId.NIGHT -> NightWorld(s, a)
     }
     if (id != WorldId.SIMPLE) Pocket(s, a)
