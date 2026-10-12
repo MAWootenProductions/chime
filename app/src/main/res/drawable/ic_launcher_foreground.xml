@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Mote: a glowing forest fairy light -->
+    <path android:pathData="M54,54m-26,0a26,26 0,1 1,52 0a26,26 0,1 1,-52 0">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial" android:centerX="54" android:centerY="54" android:gradientRadius="26">
+                <item android:offset="0" android:color="#FFF6FFE8" />
+                <item android:offset="0.22" android:color="#FFD7F7B8" />
+                <item android:offset="0.5" android:color="#668FD47A" />
+                <item android:offset="1" android:color="#008FD47A" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- leaf wings -->
+    <path android:fillColor="#CCE9F7D2" android:pathData="M50,50 C40,38 30,38 28,44 C30,50 40,52 50,52 Z" />
+    <path android:fillColor="#CCE9F7D2" android:pathData="M58,50 C68,38 78,38 80,44 C78,50 68,52 58,52 Z" />
+    <path android:fillColor="#99E9F7D2" android:pathData="M50,56 C42,62 36,66 38,70 C44,70 48,64 51,58 Z" />
+    <path android:fillColor="#99E9F7D2" android:pathData="M58,56 C66,62 72,66 70,70 C64,70 60,64 57,58 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M54,54m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
+</vector>
