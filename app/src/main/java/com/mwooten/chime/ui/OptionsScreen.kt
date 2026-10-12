@@ -83,34 +83,36 @@ fun OptionsScreen(
     toast: (String) -> Unit,
     requestNotifications: () -> Unit,
     onOpenProjects: () -> Unit,
+    startPage: String = "top",
 ) {
     val ctx = LocalContext.current
-    var page by rememberSaveable { mutableStateOf("top") }
+    var page by rememberSaveable { mutableStateOf(startPage) }
     var tick by remember { mutableIntStateOf(0) }
     LaunchedEffect(page) { while (page == "permissions") { delay(1000); tick++ } }
-    BackHandler { if (page == "top") onClose() else page = "top" }
+    fun back() { if (page == "top" || page == startPage) onClose() else page = "top" }
+    BackHandler { back() }
 
     Box(Modifier.fillMaxSize().background(Ink)) {
         AnimatedContent(page, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(120)) }, label = "opt") { p ->
             Column(Modifier.fillMaxSize().systemBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (p == "top") "‹ Back to your world" else "‹ Options", style = small.copy(color = Paper),
-                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { if (p == "top") onClose() else page = "top" }.padding(8.dp))
+                    Text(if (p == "top" || p == startPage) "‹ Back" else "‹ Settings", style = small.copy(color = Paper),
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { back() }.padding(8.dp))
                 }
                 @Suppress("UNUSED_VARIABLE") val refresh = tick
                 when (p) {
-                    "world" -> WorldPicker { Settings.setWorld(ctx, it.name); onChanged(); toast("Welcome to ${it.title}."); onClose() }
+                    "world" -> WorldPicker { Settings.setWorld(ctx, it.name); onChanged(); toast("Switched to ${it.title} mode."); onClose() }
                     "companion" -> CompanionPicker(focus) { Settings.setCompanion(ctx, it); onChanged(); toast("${it.title} is with you now."); onClose() }
                     "reminders" -> Reminders(ctx, toast) { tick++ }
                     "permissions" -> Permissions(ctx, requestNotifications)
                     "brain" -> SmartReplies(ctx, toast) { page = "top" }
                     else -> {
-                        Text("Options", style = head)
+                        Text("Settings", style = head)
                         Spacer(Modifier.height(6.dp))
                         val w = WorldId.byName(Settings.world(ctx)); val c = Settings.companion(ctx)
-                        TopRow("World", w.title) { page = "world" }
-                        TopRow("Companion", "${c.title} · ${c.trait.lowercase()}", Color(c.color)) { page = "companion" }
+                        TopRow("Mode", w.title) { page = "world" }
+                        TopRow("Personality", "${c.title} · ${c.trait.lowercase()}", Color(c.color)) { page = "companion" }
                         TopRow("Smart replies", if (Settings.apiKey(ctx).isNotBlank()) "On · powered by Claude" else "Basic · add an API key to turn on",
                             if (Settings.apiKey(ctx).isNotBlank()) Color(0xFF9FD6A0) else null) { page = "brain" }
                         TopRow("Projects", if (Settings.githubToken(ctx).isNotBlank()) "Tracking your GitHub repos" else "Connect GitHub to track Claude's work") { onOpenProjects() }
@@ -143,8 +145,8 @@ private fun TopRow(title: String, value: String, dot: Color? = null, onClick: ()
 private fun WorldPicker(onPick: (WorldId) -> Unit) {
     val ctx = LocalContext.current
     val current = Settings.world(ctx)
-    Text("Where are you today?", style = head.copy(fontSize = 30.sp))
-    Text("Worlds change the look. Your quests stay the same.", style = small)
+    Text("Choose a mode", style = head.copy(fontSize = 30.sp))
+    Text("Modes change how Chime looks and feels. Your list stays the same.", style = small)
     Category.entries.forEach { cat ->
         Spacer(Modifier.height(10.dp))
         Text(cat.title.uppercase(), style = eyebrow)
@@ -167,6 +169,7 @@ private fun WorldPicker(onPick: (WorldId) -> Unit) {
 /** A color strip per world so the list reads at a glance. */
 private fun worldSwatch(w: WorldId): Brush = Brush.verticalGradient(
     when (w) {
+        WorldId.SIMPLE -> listOf(Color(0xFF0F0F12), Color(0xFF7CC35A))
         WorldId.PLAIN -> listOf(Color(0xFFF4F2ED), Color(0xFFC2452D))
         WorldId.MOM -> listOf(Color(0xFF1F6F6A), Color(0xFFECEBE6))
         WorldId.BUDDY -> listOf(Color(0xFF0A246A), Color(0xFFECE9D8))
@@ -205,7 +208,7 @@ private fun CompanionPicker(focus: Quest?, onPick: (Companion) -> Unit) {
     val ctx = LocalContext.current
     var sel by remember { mutableStateOf(Settings.companion(ctx)) }
     val sample = focus ?: Quest("sample", "Respond to jury duty letter", System.currentTimeMillis() + 2 * 3600_000L, false, "by")
-    Text("Who's with you?", style = head.copy(fontSize = 30.sp))
+    Text("Choose a personality", style = head.copy(fontSize = 30.sp))
     Text("Same reminders, five ways of saying them.", style = small)
     Spacer(Modifier.height(6.dp))
     Companion.entries.forEach { c ->

@@ -23,7 +23,10 @@ import java.time.format.DateTimeFormatter
 object Brain {
     const val MODEL = "claude-haiku-5-5"
 
-    data class Result(val reply: String, val changed: Boolean)
+    data class Result(val reply: String, val changed: Boolean, val added: List<String> = emptyList())
+
+    /** Ids of quests added during the current [handle] call (calls run one at a time). */
+    private val added = mutableListOf<String>()
 
     /** [aboutId] is the quest the conversation is about (the one the companion just mentioned), if any. */
     suspend fun handle(ctx: Context, text: String, aboutId: String? = null): Result = withContext(Dispatchers.IO) {
@@ -31,12 +34,13 @@ object Brain {
         val who = Settings.companion(ctx)
         val about = (aboutId?.let { QuestStore.get(ctx, it) }) ?: focusQuest(QuestStore.all(ctx))
         remember(ctx, "user", text)
+        added.clear()
         val key = Settings.apiKey(ctx)
         val result = if (key.isNotBlank()) {
             try { askClaude(ctx, key, text, about) } catch (e: Exception) { offline(ctx, text, about, who) }
         } else offline(ctx, text, about, who)
         remember(ctx, "assistant", result.reply)
-        result
+        result.copy(added = added.toList())
     }
 
     // ---------------------------------------------------------------- Claude
@@ -157,7 +161,8 @@ object Brain {
                         val p = Parser.parse(t)
                         val d = due ?: p.due?.let { it to p.allDay }
                         val title = if (due != null) t.replaceFirstChar { it.uppercase() } else p.title.ifBlank { t }
-                        QuestStore.upsert(ctx, Quest(Quest.newId(), title, d?.first, d?.second ?: false, if (d?.second == true) "by" else p.kind))
+                        val nq = Quest(Quest.newId(), title, d?.first, d?.second ?: false, if (d?.second == true) "by" else p.kind)
+                        QuestStore.upsert(ctx, nq); added += nq.id
                         changed = true
                     }
                 }
@@ -212,7 +217,8 @@ object Brain {
         // anything else is a new quest
         val p = Parser.parse(raw)
         if (p.title.isBlank()) return Result(who.emptyLine, false)
-        QuestStore.upsert(ctx, Quest(Quest.newId(), p.title, p.due, p.allDay, p.kind))
+        val nq = Quest(Quest.newId(), p.title, p.due, p.allDay, p.kind)
+        QuestStore.upsert(ctx, nq); added += nq.id
         val lbl = Time.dueLabel(p.due, p.allDay, p.kind).lowercase()
         return Result(say("Got it: “${p.title}”, $lbl.", "“${p.title}”, $lbl. Added. You're welcome.", "“${p.title}”, $lbl! Into the pile it goes.", "Added “${p.title}”, $lbl. I'll try to remind you well.", "“${p.title}”. $lbl. LOCKED IN."), true)
     }

@@ -83,7 +83,13 @@ import com.mwooten.chime.worlds.WorldState
 import kotlinx.coroutines.delay
 
 /** Something the companion is holding for you (opened from a notification). */
-data class MoteMessage(val text: String, val questId: String?)
+data class MoteMessage(
+    val text: String,
+    val questId: String?,
+    /** "reminder" (from a notification), "confirm" (something was just added), "reply", or "thinking". */
+    val kind: String = "reminder",
+    val added: List<String> = emptyList(),
+)
 
 class MainActivity : ComponentActivity() {
     private val incoming = mutableStateOf<MoteMessage?>(null)
@@ -127,6 +133,7 @@ fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, co
     var toastKey by remember { mutableIntStateOf(0) }
     var settingsRev by remember { mutableIntStateOf(0) }
     var letter by remember { mutableStateOf<MoteMessage?>(null) }
+    var optionsPage by remember { mutableStateOf("top") }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
     // keep "time left" text fresh
@@ -153,6 +160,18 @@ fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, co
     val companion = remember(settingsRev) { Settings.companion(ctx) }
     val state = remember(quests, companion, now) { WorldState(quests, companion, System.currentTimeMillis()) }
 
+    fun talk(text: String, about: String?) {
+        if (text.isBlank()) return
+        thinking = true
+        letter = MoteMessage("…", about, "thinking")
+        scope.launch {
+            val r = Brain.handle(ctx, text, about)
+            thinking = false
+            letter = if (r.added.isNotEmpty()) MoteMessage(r.reply, r.added.first(), "confirm", r.added)
+            else MoteMessage(r.reply, about?.let { id -> QuestStore.get(ctx, id)?.takeIf { !it.done }?.id }, "reply")
+        }
+    }
+
     val actions = remember {
         object : WorldActions {
             override fun done(q: Quest) {
@@ -163,18 +182,11 @@ fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, co
                 QuestStore.snooze(ctx, q.id, minutes)
                 say(if (minutes >= 60) "Later: back in ${minutes / 60} hour${if (minutes >= 120) "s" else ""}." else "Later: back in $minutes minutes.")
             }
-            override fun spill(text: String) {
-                if (text.isBlank()) return
-                thinking = true
-                letter = MoteMessage("…", null)
-                scope.launch {
-                    val r = Brain.handle(ctx, text, null)
-                    thinking = false
-                    letter = MoteMessage(r.reply, focusQuest(QuestStore.all(ctx))?.id)
-                }
-            }
+            override fun spill(text: String) { talk(text, null) }
             override fun openLog() { screen = "log" }
-            override fun openOptions() { screen = "options" }
+            override fun openOptions() { optionsPage = "top"; screen = "options" }
+            override fun openPersonality() { optionsPage = "companion"; screen = "options" }
+            override fun openMode() { optionsPage = "world"; screen = "options" }
             override fun openQuest(q: Quest) { sheetId = q.id }
         }
     }
@@ -196,6 +208,7 @@ fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, co
                     toast = ::say,
                     requestNotifications = ::requestNotifications,
                     onOpenProjects = { screen = "projects" },
+                    startPage = optionsPage,
                 )
                 else -> WorldHost(worldId, state, actions)
             }
@@ -215,28 +228,50 @@ fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, co
                     Box(Modifier.size(12.dp).clip(CircleShape).background(Color(companion.color)))
                     Text(companion.title.uppercase(), style = T.small.copy(fontFamily = Fonts.nunito, fontWeight = FontWeight.W800, letterSpacing = 2.sp, color = Color(companion.dark)))
                 }
-                Text(l?.text ?: "", style = T.body.copy(fontFamily = Fonts.fraunces, fontWeight = FontWeight.W600, fontSize = 20.sp, lineHeight = 27.sp, color = Color(0xFF1B1A17)))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (lq != null && !lq.done) {
-                        LetterButton("Done", true, companion.color) { actions.done(lq); letter = null }
-                        LetterButton("Later", false, companion.color) { actions.snooze(lq, 30); letter = null }
-                        LetterButton("Open", false, companion.color) { sheetId = lq.id; letter = null }
+                val ink = Color(0xFF1B1A17)
+                val kind = l?.kind ?: "reply"
+                if (kind == "confirm") {
+                    // a plain confirmation: what was heard, when, and Confirm / Cancel
+                    val adds = l?.added.orEmpty().mapNotNull { id -> quests.firstOrNull { it.id == id } }
+                    Text(if (adds.size > 1) "Remind you about these?" else "Remind you about this?",
+                        style = T.body.copy(fontFamily = Fonts.fraunces, fontWeight = FontWeight.W800, fontSize = 22.sp, color = ink))
+                    adds.forEach { q ->
+                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color.White).padding(horizontal = 14.dp, vertical = 12.dp)) {
+                            Text(q.text, style = T.body.copy(fontFamily = Fonts.nunito, fontWeight = FontWeight.W800, fontSize = 18.sp, color = ink))
+                            Text(if (q.due == null) "No time set. It'll wait on your list." else q.label(),
+                                style = T.body.copy(fontFamily = Fonts.nunito, fontWeight = FontWeight.W600, fontSize = 15.sp, color = Color(companion.dark)))
+                        }
                     }
-                    LetterButton("Close", false, companion.color) { letter = null }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Box(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(companion.color)).clickable {
+                            letter = null; say("Saved. ${companion.title} will remind you.")
+                        }.padding(14.dp), contentAlignment = Alignment.Center) {
+                            Text("Confirm", style = T.body.copy(fontFamily = Fonts.nunito, fontWeight = FontWeight.W800, fontSize = 16.sp, color = Color.White))
+                        }
+                        Box(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).border(1.5.dp, Color(0x332A1E0E), RoundedCornerShape(12.dp)).clickable {
+                            l?.added.orEmpty().forEach { QuestStore.delete(ctx, it) }; letter = null; say("Canceled. Nothing was added.")
+                        }.padding(14.dp), contentAlignment = Alignment.Center) {
+                            Text("Cancel", style = T.body.copy(fontFamily = Fonts.nunito, fontWeight = FontWeight.W800, fontSize = 16.sp, color = ink))
+                        }
+                    }
+                } else {
+                    Text(l?.text ?: "", style = T.body.copy(fontFamily = Fonts.fraunces, fontWeight = FontWeight.W600, fontSize = 20.sp, lineHeight = 27.sp, color = ink))
+                    if (kind != "thinking") FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Done / Later only make sense when this is a reminder about something due
+                        if (kind == "reminder" && lq != null && !lq.done) {
+                            LetterButton("Done", true, companion.color) { actions.done(lq); letter = null }
+                            LetterButton("Later", false, companion.color) { actions.snooze(lq, 30); letter = null }
+                            LetterButton("Open", false, companion.color) { sheetId = lq.id; letter = null }
+                            LetterButton("Close", false, companion.color) { letter = null }
+                        } else {
+                            LetterButton("OK", true, companion.color) { letter = null }
+                        }
+                    }
                 }
                 if (!thinking) SpillInput(
-                    onSpill = { text ->
-                        val about = l?.questId
-                        thinking = true
-                        letter = MoteMessage("…", about)
-                        scope.launch {
-                            val r = Brain.handle(ctx, text, about)
-                            thinking = false
-                            letter = MoteMessage(r.reply, about?.let { id -> QuestStore.get(ctx, id)?.takeIf { !it.done }?.id } ?: focusQuest(QuestStore.all(ctx))?.id)
-                        }
-                    },
+                    onSpill = { text -> talk(text, l?.questId) },
                     textStyle = T.body.copy(fontFamily = Fonts.nunito, fontWeight = FontWeight.W600, fontSize = 16.sp, color = Color(0xFF1B1A17)),
-                    placeholder = "Reply to ${companion.title}…",
+                    placeholder = if (l?.kind == "confirm") "Something off? Say the fix…" else "Reply to ${companion.title}…",
                     placeholderColor = Color(0xFF8A857A),
                     cursor = Color(companion.color),
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color.White).padding(horizontal = 14.dp, vertical = 12.dp),

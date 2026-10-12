@@ -45,15 +45,20 @@ interface WorldActions {
     fun openOptions()
     /** Open the detail sheet for one quest (rename, move, delete). */
     fun openQuest(q: Quest)
+    /** Jump straight to the personality picker. */
+    fun openPersonality() = openOptions()
+    /** Jump straight to the mode picker. */
+    fun openMode() = openOptions()
 }
 
 enum class Category(val title: String) {
-    TALK("Talk to me"), GADGETS("Phones and gadgets"), GAMES("Games"),
+    START("Start here"), TALK("Talk to me"), GADGETS("Phones and gadgets"), GAMES("Games"),
     COMPUTERS("Computers and the early web"), PAPER("Paper, sea and sky"),
 }
 
-/** All 30 worlds, in picker order. */
+/** Every mode, in picker order. */
 enum class WorldId(val title: String, val blurb: String, val category: Category, val dark: Boolean) {
+    SIMPLE("Simple", "One sphere. Tap and talk.", Category.START, true),
     PLAIN("Plain", "A paper day planner", Category.TALK, false),
     MOM("Text from Mom", "She signs every text", Category.TALK, false),
     BUDDY("Buddy List", "Away messages and IMs", Category.TALK, false),
@@ -90,7 +95,7 @@ enum class WorldId(val title: String, val blurb: String, val category: Category,
     NIGHT("Night Sky", "Your day as a star chart", Category.PAPER, true);
 
     companion object {
-        fun byName(name: String?) = entries.firstOrNull { it.name == name } ?: PLAIN
+        fun byName(name: String?) = entries.firstOrNull { it.name == name } ?: SIMPLE
     }
 }
 
@@ -98,6 +103,7 @@ enum class WorldId(val title: String, val blurb: String, val category: Category,
 @Composable
 fun WorldHost(id: WorldId, s: WorldState, a: WorldActions) {
     when (id) {
+        WorldId.SIMPLE -> SimpleWorld(s, a)
         WorldId.PLAIN -> PlainWorld(s, a)
         WorldId.MOM -> MomWorld(s, a)
         WorldId.BUDDY -> BuddyWorld(s, a)
