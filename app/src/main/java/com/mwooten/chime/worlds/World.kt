@@ -98,7 +98,7 @@ enum class WorldId(val title: String, val blurb: String, val category: Category,
 /** Draws whichever world is selected. Each world fills the whole screen and handles its own system-bar padding. */
 @Composable
 fun WorldHost(id: WorldId, s: WorldState, a: WorldActions) {
-    // every mode keeps your character: Simple draws it big; the others carry it in the corner
+    // every mode draws your character itself, in that mode's own medium (see CharacterArt)
     Box(Modifier.fillMaxSize()) {
     when (id) {
         WorldId.SIMPLE -> SimpleWorld(s, a)
@@ -124,6 +124,5 @@ fun WorldHost(id: WorldId, s: WorldState, a: WorldActions) {
         WorldId.BOTTLE -> BottleWorld(s, a)
         WorldId.NIGHT -> NightWorld(s, a)
     }
-    if (id != WorldId.SIMPLE) Pocket(s, a)
     }
 }

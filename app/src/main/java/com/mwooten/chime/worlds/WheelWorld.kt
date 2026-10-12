@@ -102,6 +102,7 @@ fun WheelWorld(s: WorldState, a: WorldActions) {
         while (true) { value = System.currentTimeMillis(); delay(1000) }
     }
     val clock = rememberClock()
+    val voice = rememberVoice { heard -> a.spill(heard) }
 
     Box(
         Modifier.fillMaxSize()
@@ -162,7 +163,7 @@ fun WheelWorld(s: WorldState, a: WorldActions) {
                             .padding(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        WheelArt(s)
+                        WheelArt(s, voice)
                         Column(Modifier.weight(1f).padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(
                                 q?.text ?: "Nothing Due",
@@ -171,7 +172,7 @@ fun WheelWorld(s: WorldState, a: WorldActions) {
                             )
                             Text(s.companion.title, style = TextStyle(fontFamily = Fonts.archivo, fontSize = 13.sp, color = Color(0xFF444444)))
                             Text(
-                                q?.dueText() ?: "Press the center to spill",
+                                q?.dueText() ?: "Press the center to add one",
                                 style = TextStyle(fontFamily = Fonts.archivo, fontSize = 13.sp, color = Color(0xFF777777)),
                                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )
@@ -195,13 +196,16 @@ fun WheelWorld(s: WorldState, a: WorldActions) {
                         }
                         Row(Modifier.fillMaxWidth()) {
                             val st = TextStyle(fontFamily = Fonts.archivo, fontWeight = FontWeight.W600, fontSize = 11.sp, color = Color(0xFF111111))
-                            Text(if (q == null) "Spilled --" else "Spilled ${wheelDay(q.created)}", style = st, modifier = Modifier.weight(1f))
+                            Text(if (q == null) "Added --" else "Added ${wheelDay(q.created)}", style = st, modifier = Modifier.weight(1f))
                             Text(if (q == null) "--:--" else wheelRemaining(q, tick), style = st)
                         }
                     }
                     // the companion's liner note
                     Text(
-                        "${s.companion.title}: “$line”",
+                        when {
+                            voice.listening -> "Recording… " + voice.heard.ifBlank { "say what's due" }
+                            else -> "${s.companion.title}: “$line”"
+                        },
                         style = TextStyle(fontFamily = Fonts.archivo, fontSize = 12.sp, lineHeight = 15.sp, color = Color(0xFF3A3410)),
                         maxLines = 3, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.fillMaxWidth().background(Color(0xFFFFF8D8))
@@ -238,7 +242,7 @@ fun WheelWorld(s: WorldState, a: WorldActions) {
                     SpillInput(
                         onSpill = { a.spill(it); spilling = false },
                         textStyle = TextStyle(fontFamily = Fonts.archivo, fontSize = 15.sp, color = Color(0xFF111111)),
-                        placeholder = "New track: what's due?",
+                        placeholder = "New to-do: what's due?",
                         placeholderColor = Color(0xFF9A9A96),
                         cursor = WheelBlue,
                         modifier = Modifier.weight(1f),
@@ -254,47 +258,44 @@ fun WheelWorld(s: WorldState, a: WorldActions) {
                 }
             } else {
                 Text(
-                    "Spin to scrub through your quests. Press the center to spill.",
+                    voice.note.ifBlank { "Spin to scroll your to-dos. Press the center to type one, or tap the cover to talk." },
                     style = TextStyle(fontFamily = Fonts.archivo, fontSize = 12.sp, letterSpacing = 0.5.sp, color = Color(0xFF8A8A86), textAlign = TextAlign.Center),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
             Text(
-                "SETTINGS",
-                style = TextStyle(fontFamily = Fonts.archivo, fontWeight = FontWeight.W700, fontSize = 11.sp, letterSpacing = 1.sp, color = WheelGrey),
-                modifier = Modifier.padding(top = 6.dp, bottom = 14.dp).tap(a::openOptions).padding(horizontal = 12.dp, vertical = 6.dp),
+                "Settings",
+                style = TextStyle(fontFamily = Fonts.archivo, fontWeight = FontWeight.W700, fontSize = 13.sp, letterSpacing = 0.5.sp, color = Color(0xFF3A3A38)),
+                modifier = Modifier.padding(top = 8.dp, bottom = 14.dp).clip(RoundedCornerShape(50))
+                    .background(Brush.verticalGradient(listOf(Color.White, Color(0xFFE1E1DC))))
+                    .border(1.dp, Color(0xFFC8C8C2), RoundedCornerShape(50))
+                    .tap(a::openOptions).padding(horizontal = 18.dp, vertical = 7.dp),
             )
         }
     }
 }
 
-/** Album art: the companion as a small bird on a branch, in its own colors. */
+/** Album art: the user's character as a flat drawn cover, on a sleeve in its own colors. Tap to talk. */
 @Composable
-private fun WheelArt(s: WorldState) {
+private fun WheelArt(s: WorldState, voice: Voice) {
     val c = s.companion.c
-    val body = lerp(c, s.companion.cDark, 0.35f)
-    val wing = s.companion.cDark
-    val hi = lerp(c, s.companion.cLight, 0.5f)
     Box(
         Modifier.size(96.dp)
             .drawBehind {
                 drawRect(Color(0x1F000000), topLeft = Offset(0f, 4.dp.toPx()), size = size)
             }
-            .background(Brush.linearGradient(listOf(s.companion.cLight, lerp(c, s.companion.cLight, 0.25f)))),
+            .background(Brush.linearGradient(listOf(s.companion.cLight, lerp(c, s.companion.cLight, 0.25f))))
+            .drawBehind {
+                // sleeve detail: a thin rule and a sticker dot, like a single's cover
+                drawLine(Color(0x33000000), Offset(0f, size.height - 14.dp.toPx()), Offset(size.width, size.height - 14.dp.toPx()), 1.dp.toPx())
+                drawCircle(if (voice.listening) Color(0xFFE53935) else Color(0x55FFFFFF), 4.dp.toPx(), Offset(size.width - 9.dp.toPx(), 9.dp.toPx()))
+            },
+        contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(96.dp)) {
-            val u = size.width / 96f
-            fun P(x: Float, y: Float) = Offset(x * u, y * u)
-            drawPath(Path().apply { moveTo(14 * u, 70 * u); cubicTo(30 * u, 66 * u, 60 * u, 70 * u, 84 * u, 64 * u) }, Color(0xFF5A3A1E), style = Stroke(3 * u))
-            drawOval(body, topLeft = P(30f, 40f), size = Size(40 * u, 28 * u))
-            drawCircle(body, 9 * u, P(64f, 44f))
-            drawPath(Path().apply { moveTo(72 * u, 43 * u); lineTo(80 * u, 45 * u); lineTo(72 * u, 48 * u); close() }, Color(0xFFE8A93A))
-            drawCircle(Color(0xFF111111), 1.8f * u, P(66f, 42f))
-            drawPath(Path().apply { moveTo(32 * u, 52 * u); lineTo(20 * u, 44 * u); lineTo(24 * u, 54 * u); close() }, wing)
-            drawPath(Path().apply { moveTo(42 * u, 50 * u); cubicTo(48 * u, 44 * u, 58 * u, 46 * u, 60 * u, 54 * u) }, hi, style = Stroke(2 * u))
-            drawLine(Color(0xFF5A3A1E), P(46f, 66f), P(46f, 72f), 2 * u)
-            drawLine(Color(0xFF5A3A1E), P(54f, 66f), P(54f, 72f), 2 * u)
-        }
+        CharacterArt(
+            78.dp, ArtStyle.FLAT, who = s.companion, level = voice.level, listening = voice.listening,
+            glow = false, onTap = { voice.toggle() },
+        )
     }
 }
 

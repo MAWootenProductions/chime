@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,10 +13,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -80,14 +83,6 @@ private val AdvMap: List<AdvPx> = buildList {
     add(advPx(117, 78, 1, 5, 0xFFE2533A)); add(advPx(118, 78, 3, 2, 0xFFE2533A))
 }
 
-/** Hero: an original kid with an orange scarf and a satchel. */
-private val AdvHero: List<AdvPx> = listOf(
-    advPx(57, 118, 6, 5, 0xFFF2C8A0), advPx(56, 116, 8, 3, 0xFF4A2A1A),
-    advPx(58, 120, 1, 1, 0xFF1A1A1A), advPx(61, 120, 1, 1, 0xFF1A1A1A),
-    advPx(56, 123, 8, 2, 0xFFF08A2A), advPx(56, 125, 8, 6, 0xFF3A6AA8), advPx(63, 125, 3, 4, 0xFF8A5A2A),
-    advPx(57, 131, 2, 2, 0xFF2A2A2A), advPx(61, 131, 2, 2, 0xFF2A2A2A),
-)
-
 private val AdvArrow: List<AdvPx> = listOf(
     advPx(111, 70, 4, 4, 0xFFFFE24A), advPx(110, 74, 6, 1, 0xFFFFE24A), advPx(111, 75, 4, 1, 0xFFFFE24A), advPx(112, 76, 2, 1, 0xFFFFE24A),
 )
@@ -106,6 +101,8 @@ fun AdventureWorld(s: WorldState, a: WorldActions) {
     val clock = rememberClock()
     val shadowPx = with(LocalDensity.current) { 2.dp.toPx() }
     val hud = TextStyle(fontFamily = Fonts.pixelifySans, color = Color.White, shadow = Shadow(Color.Black, Offset(shadowPx, shadowPx), 0f))
+    // tap the hero to talk: whatever you say becomes a new quest
+    val voice = rememberVoice { heard -> a.spill(heard) }
 
     // daylight = hours until the focus quest is due
     val due: Long? = f?.due
@@ -123,7 +120,11 @@ fun AdventureWorld(s: WorldState, a: WorldActions) {
         else -> "${minsLeft / 60} hrs till $target"
     }
 
-    Box(Modifier.fillMaxSize().background(AdvNight)) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(AdvNight)) {
+        // map grid -> dp, matching the Canvas math below
+        val kDp = maxWidth / 130f
+        val shift = (maxHeight - 250.dp) - kDp * 140f
+        val oyDp = if (shift < 0.dp) shift else 0.dp
         // the overworld, scaled to the screen width with hard pixel edges
         Canvas(Modifier.fillMaxSize()) {
             val k = size.width / 130f
@@ -137,26 +138,28 @@ fun AdventureWorld(s: WorldState, a: WorldActions) {
             AdvMap.forEach { advRect(it.x, it.y, it.w, it.h, Color(it.c), k, 0f, oy) }
 
             val t = clock.value
-            // hero bobs one screen pixel, two steps
-            val bob = if (floor(t / 0.25f).toInt() % 2 == 1) -1f / 3f else 0f
-            AdvHero.forEach { advRect(it.x, it.y + bob, it.w, it.h, Color(it.c), k, 0f, oy) }
+            // the hero's shadow on the grass (the hero itself is the user's character, drawn on top)
+            advRect(55f, 132f, 10f, 2f, Color(0x55000000), k, 0f, oy)
             // quest arrow over the mailbox
             if (f != null) {
                 val drop = if (floor(t / 0.4f).toInt() % 2 == 1) 1f else 0f
                 AdvArrow.forEach { advRect(it.x, it.y + drop, it.w, it.h, Color(it.c), k, 0f, oy) }
             }
-            // the companion: a small bird flitting near the hero, tinted to its colors
-            val flit = listOf(0f to 0f, 2f to -1.33f, 3.33f to 0.67f, 1f to 1.67f)[floor(t / 0.4f).toInt() % 4]
-            val bx = 65.3f + flit.first
-            val by = 110f + flit.second
-            val body = s.companion.c
-            val wing = s.companion.cDark
-            advRect(bx + 1, by + 2, 5f, 3f, body, k, 0f, oy)
-            advRect(bx, by + 1, 3f, 2f, body, k, 0f, oy)
-            advRect(bx + 5, by, 2f, 2f, wing, k, 0f, oy)
-            advRect(bx + 1, by + 1, 1f, 1f, Color(0xFF111111), k, 0f, oy)
-            advRect(bx, by + 2, 1f, 1f, Color(0xFF3A2A1A), k, 0f, oy)
         }
+
+        // the hero: the user's own character as a chunky sprite, standing on the path
+        val heroSize = kDp * 22f
+        val hop = if (floor(clock.value / 0.25f).toInt() % 2 == 1) -(kDp / 3f) else 0.dp
+        CharacterArt(
+            size = heroSize,
+            style = ArtStyle.PIXEL,
+            modifier = Modifier.offset(x = kDp * 60f - heroSize / 2f, y = oyDp + kDp * 133.5f - heroSize + hop),
+            level = voice.level,
+            listening = voice.listening,
+            glow = false,
+            pixels = 24,
+            onTap = { voice.toggle() },
+        )
 
         Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
             // HUD
@@ -185,7 +188,7 @@ fun AdventureWorld(s: WorldState, a: WorldActions) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     AdvSlot("PEN", { writing = !writing }) { advPen(it) }
                     AdvSlot("LOG", { a.openLog() }) { advLetter(it) }
-                    AdvSlot("MENU", { a.openOptions() }) { advMenu(it) }
+                    AdvSlot("Settings", { a.openOptions() }) { advMenu(it) }
                 }
             }
 
@@ -203,10 +206,21 @@ fun AdventureWorld(s: WorldState, a: WorldActions) {
             ) {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        if (writing) "JOURNAL" else s.companion.title.uppercase(),
+                        if (writing) "JOURNAL" else if (voice.listening) "LISTENING..." else s.companion.title.uppercase(),
                         style = hud.copy(shadow = null), color = s.companion.c, fontSize = 13.sp, fontWeight = FontWeight.W700,
                     )
-                    if (writing || f == null) {
+                    if (voice.listening || (voice.note.isNotBlank() && !writing)) {
+                        // what the hero hears, typed out like dialog
+                        Text(
+                            if (voice.listening) voice.heard.ifBlank { "Speak up, adventurer. I'm all ears..." } else voice.note,
+                            style = hud.copy(shadow = null), color = if (voice.listening) AdvGold else Color.White,
+                            fontSize = 17.sp, lineHeight = 23.sp, maxLines = 4, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.tap { voice.toggle() },
+                        )
+                    }
+                    if (voice.listening) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { AdvBlinkArrow(clock) }
+                    } else if (writing || f == null) {
                         if (!writing) {
                             Text(s.line, style = hud.copy(shadow = null), fontSize = 17.sp, lineHeight = 23.sp, maxLines = 5, overflow = TextOverflow.Ellipsis)
                         }
@@ -282,7 +296,8 @@ private fun AdvButton(label: String, bg: Color, modifier: Modifier, onClick: () 
 private fun AdvSlot(label: String, onClick: () -> Unit, icon: DrawScope.(Float) -> Unit) {
     Column(
         Modifier
-            .size(46.dp)
+            .height(46.dp)
+            .widthIn(min = 46.dp)
             .border(3.dp, Color.White)
             .background(Color.Black.copy(alpha = 0.55f))
             .tap(onClick),
@@ -291,7 +306,7 @@ private fun AdvSlot(label: String, onClick: () -> Unit, icon: DrawScope.(Float) 
     ) {
         Canvas(Modifier.size(22.dp, 18.dp)) { icon(this, size.height / 10f) }
         Spacer(Modifier.width(2.dp).height(2.dp))
-        Text(label, fontFamily = Fonts.pixelifySans, fontSize = 9.sp, color = Color.White, lineHeight = 10.sp, maxLines = 1)
+        Text(label, fontFamily = Fonts.pixelifySans, fontSize = 9.sp, color = Color.White, lineHeight = 10.sp, maxLines = 1, modifier = Modifier.padding(horizontal = 5.dp))
     }
 }
 

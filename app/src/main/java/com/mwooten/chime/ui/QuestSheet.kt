@@ -1,6 +1,12 @@
 package com.mwooten.chime.ui
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -48,6 +54,7 @@ fun QuestSheet(
     onSnooze: () -> Unit,
     onTomorrow: () -> Unit,
     onDelete: () -> Unit,
+    onTalk: ((String) -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -61,6 +68,9 @@ fun QuestSheet(
     val finish = Settings.finish(ctx)
     val accent = Color(finish.c)
     val overdue = !q.done && q.shelf() == Shelf.OVERDUE
+    var said by remember(q.id) { mutableStateOf("") }
+    fun tell(text: String) { val t = text.trim(); if (t.isNotEmpty() && onTalk != null) { onTalk(t); onDismiss() } }
+    val voice = com.mwooten.chime.worlds.rememberVoice { tell(it) }
 
     ModalBottomSheet(
         onDismissRequest = { close() },
@@ -75,10 +85,10 @@ fun QuestSheet(
                 // your companion, saying what it thinks about this one
                 Rise(0) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Character(look, finish, who, 0f, false, 64.dp, draggable = false) { Bell.strike(ctx, who) }
+                        Character(look, finish, who, voice.level, voice.listening, 64.dp, draggable = false) { if (onTalk != null) voice.toggle() else Bell.strike(ctx, who) }
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(who.title.uppercase(), style = Stage.eyebrow.copy(color = Color(finish.light).copy(alpha = .8f)))
-                            Text(who.line(q), style = Stage.ui.copy(fontFamily = Fonts.newsreader, fontStyle = FontStyle.Italic, fontWeight = FontWeight.W400,
+                            Text(if (voice.listening) voice.heard.ifBlank { "Listening…" } else voice.note.ifBlank { who.line(q) }, style = Stage.ui.copy(fontFamily = Fonts.newsreader, fontStyle = FontStyle.Italic, fontWeight = FontWeight.W400,
                                 fontSize = 16.sp, lineHeight = 21.sp, color = Stage.ink.copy(alpha = .85f)), maxLines = 3)
                         }
                     }
@@ -101,13 +111,31 @@ fun QuestSheet(
                         modifier = Modifier.padding(horizontal = 4.dp),
                     )
                 }
-                Rise(3) {
+                if (onTalk != null && !q.done) Rise(3) {
+                    // talk back like you would to a person: "not today", "remind me in a couple of days"
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("Remind me later", "Not today", "In a couple of days", "Next week", "This weekend").forEach { phrase ->
+                                Text(phrase, style = Stage.ui.copy(fontSize = 14.sp, color = Stage.ink),
+                                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).border(1.dp, Stage.line, RoundedCornerShape(12.dp))
+                                        .clickable { tell(phrase) }.padding(horizontal = 12.dp, vertical = 9.dp))
+                            }
+                        }
+                        StageField(
+                            said, { said = it }, "Or tell ${who.title} anything, like “not till Friday”",
+                            cursor = accent, background = Stage.bg,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(onSend = { tell(said) }),
+                        )
+                    }
+                }
+                Rise(4) {
                     Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         StageButton(if (q.done) "Not done yet" else "Mark done", Modifier.weight(1f), fill = accent) { onToggle(); onDismiss() }
                         StageButton("Snooze 1 hour", Modifier.weight(1f)) { onSnooze(); onDismiss() }
                     }
                 }
-                Rise(4) {
+                Rise(5) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         StageButton("Move to tomorrow", Modifier.weight(1f)) { onTomorrow(); onDismiss() }
                         StageButton(if (armDelete) "Really delete?" else "Delete", Modifier.weight(1f),

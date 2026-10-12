@@ -94,11 +94,14 @@ fun NightWorld(s: WorldState, a: WorldActions) {
     val mono = TextStyle(fontFamily = Fonts.dmMono, fontSize = 11.sp, color = NightText)
     val stars = (s.today + s.week).filter { it.id != q?.id }.take(NightSlots.size)
     val meteor = s.companion.c
+    // a plain shooting star crosses the sky now; your character lives in the transmission box
+    val streak = Color(0xFFFFE9D0)
+    val voice = rememberVoice { heard -> a.spill(heard) }
     val clock24 = Time.ldt(s.now).format(DateTimeFormatter.ofPattern("EEE · HH:mm", Locale.getDefault()))
     val hour0 = Time.ldt(s.now).hour
 
     Box(Modifier.fillMaxSize().background(Color(0xFF070A1A))) {
-        // sky, the companion streaking across as a meteor, and the planisphere dial
+        // sky, a shooting star, and the planisphere dial
         Canvas(Modifier.fillMaxSize()) {
             drawRect(
                 Brush.radialGradient(
@@ -113,12 +116,12 @@ fun NightWorld(s: WorldState, a: WorldActions) {
             val dir = Offset(cos(33f * PI.toFloat() / 180f), -sin(33f * PI.toFloat() / 180f))
             val tail = Offset(head.x + dir.x * 120f * k, head.y + dir.y * 120f * k)
             drawLine(
-                Brush.linearGradient(listOf(meteor, meteor.copy(alpha = 0f)), start = head, end = tail),
-                head, tail, strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round,
+                Brush.linearGradient(listOf(streak, streak.copy(alpha = 0f)), start = head, end = tail),
+                head, tail, strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round,
             )
-            val hr = 9.dp.toPx()
+            val hr = 5.dp.toPx()
             drawCircle(
-                Brush.radialGradient(0f to Color(0xFFFFF0E6), 0.6f to meteor, 1f to meteor.copy(alpha = 0f), center = head, radius = hr),
+                Brush.radialGradient(0f to Color.White, 0.6f to streak, 1f to streak.copy(alpha = 0f), center = head, radius = hr),
                 radius = hr, center = head,
             )
 
@@ -172,7 +175,7 @@ fun NightWorld(s: WorldState, a: WorldActions) {
                 )
                 NightChip("catalog", mono, a::openLog)
                 Spacer(Modifier.width(6.dp))
-                NightChip("eyepiece", mono, a::openOptions)
+                NightChip("Settings", mono, a::openOptions)
             }
 
             // the star chart
@@ -288,29 +291,48 @@ fun NightWorld(s: WorldState, a: WorldActions) {
                 }
             }
 
-            // the companion's transmission
-            Column(
+            // your character's transmission: tap the character to talk back
+            Row(
                 Modifier.fillMaxWidth().padding(horizontal = 18.dp)
                     .border(1.dp, meteor.copy(alpha = 0.5f))
                     .background(s.companion.cDark.copy(alpha = 0.3f))
-                    .then(if (q != null) Modifier.tap { a.openQuest(q) } else Modifier)
-                    .padding(horizontal = 14.dp, vertical = 12.dp)
+                    .padding(start = 8.dp, end = 14.dp, top = 10.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    buildAnnotatedString {
-                        withStyle(SpanStyle(color = meteor, fontWeight = FontWeight.W500)) { append("${name.uppercase()} › ") }
-                        append(s.line)
-                    },
-                    style = mono.copy(fontSize = 13.sp, lineHeight = 19.sp, color = s.companion.cLight),
-                    maxLines = 6,
-                    overflow = TextOverflow.Ellipsis,
+                CharacterArt(
+                    size = 60.dp,
+                    style = ArtStyle.SHINY,
+                    level = voice.level,
+                    listening = voice.listening,
+                    onTap = { voice.toggle() },
                 )
-                if (q != null) {
+                Spacer(Modifier.width(10.dp))
+                Column(
+                    Modifier.weight(1f)
+                        .then(if (q != null) Modifier.tap { a.openQuest(q) } else Modifier)
+                ) {
                     Text(
-                        "› let it drift an hour",
-                        style = mono.copy(color = NightDim),
-                        modifier = Modifier.padding(top = 6.dp).tap { a.snooze(q, 60) },
+                        buildAnnotatedString {
+                            withStyle(SpanStyle(color = meteor, fontWeight = FontWeight.W500)) { append("${name.uppercase()} › ") }
+                            when {
+                                voice.listening -> withStyle(SpanStyle(color = Color(0xFFFFE9D0))) {
+                                    append(voice.heard.ifBlank { "listening… name a new star" })
+                                }
+                                voice.note.isNotBlank() -> append(voice.note)
+                                else -> append(s.line)
+                            }
+                        },
+                        style = mono.copy(fontSize = 13.sp, lineHeight = 19.sp, color = s.companion.cLight),
+                        maxLines = 6,
+                        overflow = TextOverflow.Ellipsis,
                     )
+                    if (q != null) {
+                        Text(
+                            "› let it drift an hour",
+                            style = mono.copy(color = NightDim),
+                            modifier = Modifier.padding(top = 6.dp).tap { a.snooze(q, 60) },
+                        )
+                    }
                 }
             }
 

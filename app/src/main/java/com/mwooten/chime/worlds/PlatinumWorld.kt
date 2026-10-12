@@ -22,7 +22,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -134,11 +137,12 @@ private fun PlatWindowBox(modifier: Modifier, content: @Composable ColumnScope.(
 fun PlatinumWorld(s: WorldState, a: WorldActions) {
     val q = s.focus
     val c = s.companion
-    val clock = rememberClock()
     val addHolder = remember { arrayOfNulls<() -> Unit>(1) }
     val padItems: List<Quest> = s.today.ifEmpty { s.open }.take(5)
     val padTitle = if (s.today.isNotEmpty()) "Today" else "Note Pad"
     val lastDone = s.done.firstOrNull()
+    val voice = rememberVoice { heard -> a.spill(heard) }
+    var menuOpen by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize().platDesktop()) {
         Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
@@ -154,7 +158,7 @@ fun PlatinumWorld(s: WorldState, a: WorldActions) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Canvas(Modifier.size(14.dp).tap(a::openOptions)) {
+                Canvas(Modifier.size(14.dp).tap { menuOpen = !menuOpen }) {
                     val r = 5.dp.toPx()
                     drawCircle(c.c, radius = r)
                     drawCircle(c.cDark, radius = r, style = Stroke(1.dp.toPx()))
@@ -162,11 +166,10 @@ fun PlatinumWorld(s: WorldState, a: WorldActions) {
                 val bold = PlatText.copy(fontWeight = FontWeight.Bold)
                 Text("File", style = bold, modifier = Modifier.tap(a::openLog))
                 Text("Edit", style = bold, modifier = Modifier.tap { if (q != null) a.openQuest(q) else a.openLog() })
-                Text("View", style = bold, modifier = Modifier.tap(a::openLog))
-                Text("Special", style = bold, modifier = Modifier.tap(a::openOptions))
+                Text("Special", style = bold, modifier = Modifier.tap { menuOpen = !menuOpen })
                 Spacer(Modifier.weight(1f))
                 Text(com.mwooten.chime.data.Time.time(s.now), style = PlatText, maxLines = 1)
-                Text("Chime", style = bold, maxLines = 1, modifier = Modifier.tap(a::openOptions))
+                Text("Settings", style = bold, maxLines = 1, modifier = Modifier.tap(a::openOptions))
             }
 
             Column(
@@ -222,12 +225,18 @@ fun PlatinumWorld(s: WorldState, a: WorldActions) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(22.dp),
                     ) {
-                        PlatIcon("Chime HD", onClick = a::openOptions) {
-                            Canvas(Modifier.size(34.dp, 24.dp)) {
+                        PlatIcon("Settings", onClick = a::openOptions) {
+                            // a control-panel folder: three sliders on a grey panel
+                            Canvas(Modifier.size(34.dp, 26.dp)) {
                                 val u = size.width / 34f
-                                drawRoundRect(Color(0xFFD6D6D6), Offset(1 * u, 4 * u), Size(32 * u, 18 * u), androidx.compose.ui.geometry.CornerRadius(2 * u))
-                                drawRoundRect(Color(0xFF333333), Offset(1 * u, 4 * u), Size(32 * u, 18 * u), androidx.compose.ui.geometry.CornerRadius(2 * u), style = Stroke(u))
-                                drawRect(c.c, Offset(4 * u, 15 * u), Size(10 * u, 3 * u))
+                                drawRoundRect(Color(0xFFD6D6D6), Offset(1 * u, 2 * u), Size(32 * u, 22 * u), androidx.compose.ui.geometry.CornerRadius(2 * u))
+                                drawRoundRect(Color(0xFF333333), Offset(1 * u, 2 * u), Size(32 * u, 22 * u), androidx.compose.ui.geometry.CornerRadius(2 * u), style = Stroke(u))
+                                for ((k, knob) in listOf(6f, 14f, 10f).withIndex()) {
+                                    val x = (8 + k * 9) * u
+                                    drawLine(Color(0xFF555555), Offset(x, 6 * u), Offset(x, 20 * u), strokeWidth = u)
+                                    drawRect(if (k == 1) c.c else Color.White, Offset(x - 3 * u, knob * u), Size(6 * u, 4 * u))
+                                    drawRect(Color(0xFF333333), Offset(x - 3 * u, knob * u), Size(6 * u, 4 * u), style = Stroke(u))
+                                }
                             }
                         }
                         PlatIcon("This Week (${s.week.size})", onClick = a::openLog) {
@@ -263,18 +272,23 @@ fun PlatinumWorld(s: WorldState, a: WorldActions) {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Canvas(Modifier.size(44.dp)) {
-                            val f = (clock.value % 3f) / 3f
-                            val hop = when {
-                                f < 0.9f -> 0f
-                                f < 0.94f -> -4f * (f - 0.9f) / 0.04f
-                                else -> -4f * (1f - (f - 0.94f) / 0.06f)
-                            }
-                            translate(top = hop.dp.toPx()) { platBird(c.c, c.cDark) }
+                        // the alert icon is your character, as a chunky pixel desktop assistant. Click it to talk.
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CharacterArt(
+                                44.dp, ArtStyle.PIXEL, who = c, level = voice.level, listening = voice.listening,
+                                glow = false, pixels = 20, onTap = { voice.toggle() },
+                            )
+                            Text(
+                                if (voice.listening) "Stop" else "Talk",
+                                style = PlatText.copy(fontSize = 10.sp, color = Color(0xFF555555)),
+                            )
                         }
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             val body = PlatText.copy(fontSize = 13.sp, lineHeight = 18.sp)
-                            if (q != null) {
+                            if (voice.listening) {
+                                Text("${c.title} is listening…", style = body.copy(fontWeight = FontWeight.Bold))
+                                Text(voice.heard.ifBlank { "Say a to-do, like “pay rent Friday.”" }, style = body)
+                            } else if (q != null) {
                                 Text(
                                     "“${q.text}” — ${q.dueText()}.",
                                     style = body.copy(fontWeight = FontWeight.Bold),
@@ -284,7 +298,8 @@ fun PlatinumWorld(s: WorldState, a: WorldActions) {
                             } else {
                                 Text("There are no alerts.", style = body.copy(fontWeight = FontWeight.Bold))
                             }
-                            Text("${c.title} says: ${s.line}", style = body)
+                            if (!voice.listening) Text("${c.title} says: ${s.line}", style = body)
+                            if (!voice.listening && voice.note.isNotBlank()) Text(voice.note, style = body.copy(color = Color(0xFF8A1E10)))
                         }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End)) {
@@ -292,7 +307,7 @@ fun PlatinumWorld(s: WorldState, a: WorldActions) {
                             PlatButton("Later", default = false) { a.snooze(q, 30) }
                             PlatButton("Done", default = true) { a.done(q) }
                         } else {
-                            PlatButton("Open Log", default = true, onClick = a::openLog)
+                            PlatButton("Open List", default = true, onClick = a::openLog)
                         }
                     }
                 }
@@ -303,7 +318,7 @@ fun PlatinumWorld(s: WorldState, a: WorldActions) {
                 PlatWindowBox(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
                     PlatTitleBar("New Item", onClose = null)
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Name the thing on your mind:", style = PlatText)
+                        Text("Type a new to-do:", style = PlatText)
                         Box(
                             Modifier.fillMaxWidth().background(Color.White).border(1.dp, Color(0xFF333333))
                                 .drawBehind {
@@ -347,6 +362,36 @@ fun PlatinumWorld(s: WorldState, a: WorldActions) {
                 }
             }
         }
+
+        // the pull-down menu from the menu bar
+        if (menuOpen) {
+            Box(Modifier.fillMaxSize().tap { menuOpen = false })
+            Column(
+                Modifier.align(Alignment.TopStart).systemBarsPadding().padding(start = 4.dp, top = 21.dp)
+                    .width(200.dp).platShadow(2f, 0.4f).background(Color.White).border(1.dp, PlatEdge)
+                    .padding(vertical = 3.dp),
+            ) {
+                PlatMenuItem("Talk to ${c.title}") { menuOpen = false; voice.toggle() }
+                PlatMenuItem("To-Do List") { menuOpen = false; a.openLog() }
+                // dotted divider, as the old menus drew it
+                Canvas(Modifier.fillMaxWidth().height(7.dp)) {
+                    val p = 1.dp.toPx()
+                    var x = 0f
+                    while (x < size.width) { drawRect(Color(0xFF888888), Offset(x, size.height / 2), Size(p, p)); x += 2 * p }
+                }
+                PlatMenuItem("Settings…", bold = true) { menuOpen = false; a.openOptions() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlatMenuItem(label: String, bold: Boolean = false, onClick: () -> Unit) {
+    Box(
+        Modifier.fillMaxWidth().height(26.dp).tap(onClick).padding(horizontal = 14.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(label, style = PlatText.copy(fontSize = 13.sp, fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal), maxLines = 1)
     }
 }
 
@@ -375,28 +420,4 @@ private fun PlatIcon(label: String, onClick: () -> Unit, icon: @Composable () ->
             modifier = Modifier.background(Color.White).padding(horizontal = 3.dp),
         )
     }
-}
-
-/** The companion as a little songbird alert icon (44x44 viewBox). */
-private fun DrawScope.platBird(body: Color, wing: Color) {
-    val u = size.width / 44f
-    val ink = Color(0xFF222222)
-    val stroke = Stroke(u)
-    val b = Path().apply {
-        moveTo(6 * u, 28 * u)
-        cubicTo(6 * u, 18 * u, 16 * u, 14 * u, 26 * u, 16 * u)
-        cubicTo(32 * u, 18 * u, 36 * u, 24 * u, 34 * u, 30 * u)
-        cubicTo(28 * u, 34 * u, 14 * u, 34 * u, 6 * u, 28 * u)
-        close()
-    }
-    drawPath(b, body); drawPath(b, ink, style = stroke)
-    val tail = Path().apply { moveTo(30 * u, 22 * u); lineTo(42 * u, 8 * u); lineTo(38 * u, 22 * u); close() }
-    drawPath(tail, wing); drawPath(tail, ink, style = stroke)
-    drawCircle(body, radius = 6 * u, center = Offset(10 * u, 19 * u))
-    drawCircle(ink, radius = 6 * u, center = Offset(10 * u, 19 * u), style = stroke)
-    val beak = Path().apply { moveTo(5 * u, 18 * u); lineTo(0f, 19.5f * u); lineTo(5 * u, 20.5f * u); close() }
-    drawPath(beak, ink)
-    drawCircle(Color(0xFF111111), radius = 1.2f * u, center = Offset(8 * u, 18 * u))
-    drawLine(ink, Offset(14 * u, 34 * u), Offset(14 * u, 40 * u), strokeWidth = u)
-    drawLine(ink, Offset(20 * u, 34 * u), Offset(20 * u, 40 * u), strokeWidth = u)
 }

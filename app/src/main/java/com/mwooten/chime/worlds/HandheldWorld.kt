@@ -27,17 +27,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -63,6 +70,18 @@ private val Hh2 = Color(0xFF8BAC0F)
 private val Hh3 = Color(0xFF9BBC0F) // lightest
 private val HhNavy = Color(0xFF2A2A7A)
 
+/** Maps any color to its brightness on the LCD's green ramp (darkest 0F380F to lightest 9BBC0F). */
+private val hhLcdFilter = ColorFilter.colorMatrix(
+    ColorMatrix(
+        floatArrayOf(
+            0.165f, 0.324f, 0.060f, 0f, 15f,
+            0.155f, 0.305f, 0.057f, 0f, 56f,
+            0f, 0f, 0f, 0f, 15f,
+            0f, 0f, 0f, 1f, 0f,
+        ),
+    ),
+)
+
 private class HhPx(val x: Int, val y: Int, val w: Int, val h: Int, val c: Color)
 
 /** The enemy: an angry envelope, 16x12. */
@@ -73,23 +92,6 @@ private val hhEnemy = listOf(
     HhPx(4, 7, 2, 1, Hh0), HhPx(10, 7, 2, 1, Hh0),
     HhPx(6, 9, 4, 1, Hh0), HhPx(6, 8, 1, 1, Hh0), HhPx(9, 8, 1, 1, Hh0),
 )
-
-/** Your companion, 12x12, in LCD shades. The top tuft changes with who it is. */
-private fun hhHero(name: String): List<HhPx> {
-    val tuft = when (name) {
-        "WREN" -> listOf(HhPx(6, 1, 1, 2, Hh1), HhPx(7, 0, 2, 1, Hh1), HhPx(5, 2, 2, 1, Hh1))
-        "FIZZ" -> listOf(HhPx(3, 0, 1, 3, Hh1), HhPx(8, 0, 1, 3, Hh1), HhPx(2, 0, 1, 1, Hh0), HhPx(9, 0, 1, 1, Hh0))
-        "PIP" -> listOf(HhPx(5, 1, 2, 2, Hh1), HhPx(4, 0, 1, 1, Hh1), HhPx(7, 0, 1, 1, Hh1))
-        "DIM" -> listOf(HhPx(5, 2, 1, 1, Hh1), HhPx(6, 1, 1, 2, Hh1))
-        else -> listOf(HhPx(5, 0, 2, 2, Hh1), HhPx(3, 2, 1, 2, Hh1), HhPx(8, 1, 1, 3, Hh1))
-    }
-    return tuft + listOf(
-        HhPx(2, 4, 8, 7, Hh1), HhPx(3, 3, 6, 1, Hh1), HhPx(3, 11, 6, 1, Hh1),
-        HhPx(3, 5, 2, 1, Hh0), HhPx(7, 5, 2, 1, Hh0),
-        HhPx(4, 6, 1, 1, Hh3), HhPx(7, 6, 1, 1, Hh3),
-        HhPx(4, 8, 4, 1, Hh0), HhPx(4, 9, 4, 1, Hh2),
-    )
-}
 
 @Composable
 private fun HhSprite(px: List<HhPx>, gw: Int, gh: Int, modifier: Modifier) {
@@ -113,11 +115,12 @@ private fun hhStreak(s: WorldState): Int {
 @Composable
 fun HandheldWorld(s: WorldState, a: WorldActions) {
     val q: Quest? = s.focus
-    var sel by rememberSaveable { mutableStateOf(0) } // 0 DO IT, 1 LATER, 2 LOG, 3 SPILL
+    var sel by rememberSaveable { mutableStateOf(0) } // 0 DONE, 1 LATER, 2 LIST, 3 NEW
     var spilling by rememberSaveable { mutableStateOf(false) }
     val selected = if (q == null && sel < 2) 3 else sel
     val clock = rememberClock()
     val name = s.companion.title.uppercase()
+    val voice = rememberVoice { heard -> a.spill(heard) }
 
     fun hhRun(item: Int) {
         when (item) {
@@ -168,7 +171,7 @@ fun HandheldWorld(s: WorldState, a: WorldActions) {
                             }.clip(CircleShape).background(Color(0xFFFF3A2A)),
                         )
                     }
-                    HhLcd(s, a, q, name, selected, spilling, clock, onRun = { hhRun(it) }, onSelect = { sel = it }, onSpilled = { spilling = false }, modifier = Modifier.weight(1f))
+                    HhLcd(s, a, q, name, selected, spilling, clock, voice, onRun = { hhRun(it) }, onSelect = { sel = it }, onSpilled = { spilling = false }, modifier = Modifier.weight(1f))
                     Spacer(Modifier.width(18.dp))
                 }
             }
@@ -201,9 +204,9 @@ fun HandheldWorld(s: WorldState, a: WorldActions) {
                     Modifier.align(Alignment.TopCenter).padding(top = 4.dp).rotate(-24f),
                     horizontalArrangement = Arrangement.spacedBy(22.dp),
                 ) {
-                    HhPill("OPTIONS", a::openOptions)
-                    HhPill("LOG", a::openLog)
-                    HhPill("SPILL") { spilling = !spilling }
+                    HhPill("SETTINGS", a::openOptions)
+                    HhPill("LIST", a::openLog)
+                    HhPill("NEW") { spilling = !spilling }
                 }
                 Row(
                     Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 10.dp).rotate(-30f),
@@ -230,6 +233,7 @@ private fun HhLcd(
     selected: Int,
     spilling: Boolean,
     clock: State<Float>,
+    voice: Voice,
     onRun: (Int) -> Unit,
     onSelect: (Int) -> Unit,
     onSpilled: () -> Unit,
@@ -281,17 +285,36 @@ private fun HhLcd(
                     Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    HhSprite(
-                        hhHero(s.companion.name), 12, 12,
-                        Modifier.size(64.dp).graphicsLayer {
-                            val step = ((clock.value / 0.2f).toInt() % 2)
-                            translationY = if (step == 0) 0f else -4f * density
-                        },
-                    )
+                    // your character as a chunky sprite, pushed through the LCD's green so it sits in the four shades
+                    val lcdPaint = remember { Paint().apply { colorFilter = hhLcdFilter } }
+                    Box(
+                        Modifier.size(64.dp)
+                            .drawWithContent {
+                                drawIntoCanvas { it.saveLayer(Rect(Offset.Zero, size), lcdPaint) }
+                                drawContent()
+                                drawIntoCanvas { it.restore() }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CharacterArt(
+                            64.dp, ArtStyle.PIXEL, who = s.companion, level = voice.level, listening = voice.listening,
+                            glow = false, pixels = 24, onTap = { voice.toggle() },
+                        )
+                    }
                     Spacer(Modifier.width(10.dp))
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("$name  LV ${s.done.size + 1}", style = TextStyle(fontFamily = Fonts.silkscreen, fontWeight = FontWeight.W700, fontSize = 9.sp, color = Hh0))
                         Text("STREAK ${hhStreak(s)} DAYS", style = TextStyle(fontFamily = Fonts.silkscreen, fontSize = 8.sp, color = Hh0))
+                        Text(
+                            when {
+                                voice.listening -> "LISTENING..."
+                                voice.note.isNotBlank() -> voice.note.uppercase()
+                                else -> "TAP ME TO TALK"
+                            },
+                            style = TextStyle(fontFamily = Fonts.silkscreen, fontSize = 8.sp, lineHeight = 10.sp, color = Hh1),
+                            maxLines = 2, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 150.dp),
+                        )
                     }
                 }
             }
@@ -325,6 +348,12 @@ private fun HhLcd(
                             )
                         }
                     }
+                } else if (voice.listening) {
+                    Text(
+                        "$name IS LISTENING...\n> " + voice.heard.uppercase().ifBlank { "_" },
+                        style = txt,
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                    )
                 } else {
                     val story = if (q == null) "The path is clear. $name: ${s.line}"
                     else {
@@ -347,7 +376,7 @@ private fun HhLcd(
                 Modifier.fillMaxWidth().border(2.dp, Hh0).background(Hh2).padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                val labels = listOf("DO IT", "LATER", "LOG", "SPILL")
+                val labels = listOf("DONE", "LATER", "LIST", "NEW")
                 for (r in 0..1) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         for (c in 0..1) {

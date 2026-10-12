@@ -86,6 +86,7 @@ fun ToyWorld(s: WorldState, a: WorldActions) {
     val firstDay = s.quests.minOfOrNull { it.created } ?: s.now
     val day = ((s.now - firstDay) / 86_400_000L + 1).coerceAtLeast(1)
     val clock = rememberClock()
+    val voice = rememberVoice { heard -> a.spill(heard) }
 
     Box(
         Modifier.fillMaxSize().background(Color(0xFFF7E6F2)).drawBehind {
@@ -117,7 +118,7 @@ fun ToyWorld(s: WorldState, a: WorldActions) {
                     )
                     Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ToyPill("Dictionary", onClick = a::openLog)
-                        ToyPill("Instructions", onClick = a::openOptions)
+                        ToyPill("Settings", onClick = a::openOptions)
                     }
                 }
                 Box(Modifier.size(100.dp).rotate(12f), contentAlignment = Alignment.Center) {
@@ -143,14 +144,31 @@ fun ToyWorld(s: WorldState, a: WorldActions) {
 
             // ---- the toy itself
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                val h = minOf(maxHeight, 260.dp)
+                val h = minOf(maxHeight - 22.dp, 260.dp).coerceAtLeast(80.dp)
                 val w = h * (240f / 260f)
-                ToyCreature(s, clock, Modifier.width(w).height(h), onBelly = { if (q != null) a.done(q) })
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    ToyCreature(
+                        s, clock, Modifier.width(w).height(h),
+                        onBelly = { if (q != null) a.done(q) },
+                        onTap = { voice.toggle() },
+                    )
+                    Text(
+                        if (voice.listening) "It's listening! Tap again when you're done."
+                        else if (voice.note.isNotBlank()) voice.note
+                        else "Tap ${s.companion.title} to talk to it!",
+                        style = TextStyle(fontFamily = Fonts.baloo2, fontWeight = FontWeight.W700, fontSize = 12.sp, lineHeight = 14.sp, color = ToyPlum, textAlign = TextAlign.Center),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
             }
 
             // ---- what it says, then the translation from the little paper dictionary
-            val translation = s.line
-            val babble = toyGibberish(q?.text ?: translation)
+            val translation = when {
+                voice.listening -> "Listening: " + voice.heard.ifBlank { "say a to-do…" }
+                else -> s.line
+            }
+            val babble = if (voice.listening) "Ooh! Ooh! Tell me!" else toyGibberish(q?.text ?: s.line)
             Box(Modifier.fillMaxWidth().padding(end = 5.dp, bottom = 5.dp)) {
                 Box(
                     Modifier.matchParentSize().offset(x = 5.dp, y = 5.dp)
@@ -239,9 +257,9 @@ fun ToyWorld(s: WorldState, a: WorldActions) {
             Row(Modifier.fillMaxWidth().padding(bottom = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (q != null) {
                     ToyButton("Tickle belly", "done", dark = true, modifier = Modifier.weight(1f)) { a.done(q) }
-                    ToyButton("Pet head", "snooze", dark = false, modifier = Modifier.weight(1f)) { a.snooze(q, 60) }
+                    ToyButton("Pet head", "later", dark = false, modifier = Modifier.weight(1f)) { a.snooze(q, 60) }
                 }
-                ToyButton(if (feeding) "Not now" else "Feed it", if (feeding) "close" else "spill", dark = q == null, modifier = Modifier.weight(1f)) {
+                ToyButton(if (feeding) "Not now" else "Feed it", if (feeding) "close" else "add a to-do", dark = q == null, modifier = Modifier.weight(1f)) {
                     feeding = !feeding
                 }
             }
@@ -303,12 +321,12 @@ private fun DrawScope.toyFur(path: Path, base: Color, hatch: Color, u: Float, wi
 }
 
 @Composable
-private fun ToyCreature(s: WorldState, clock: androidx.compose.runtime.State<Float>, modifier: Modifier, onBelly: () -> Unit) {
+private fun ToyCreature(s: WorldState, clock: androidx.compose.runtime.State<Float>, modifier: Modifier, onBelly: () -> Unit, onTap: () -> Unit) {
     val fur = s.companion.c
     val furHatch = lerp(s.companion.c, s.companion.cDark, 0.35f)
     val belly = s.companion.cLight
     val bellyHatch = lerp(s.companion.cLight, s.companion.c, 0.3f)
-    Box(modifier) {
+    Box(modifier.tap(onTap)) {
         // layer 1, animated: ears wiggle behind the head
         Canvas(Modifier.fillMaxSize()) {
             val u = size.width / 240f

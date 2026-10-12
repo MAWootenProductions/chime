@@ -39,6 +39,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -104,6 +105,7 @@ fun EmailWorld(s: WorldState, a: WorldActions) {
     }
     val showFocusMail = (focus != null && list.any { it.id == focus.id }) || (focus == null && tab == 0)
     val rows = list.filter { it.id != focus?.id }.take(40)
+    val voice = rememberVoice { heard -> a.spill(heard) }
 
     Box(Modifier.fillMaxSize().background(Color.White)) {
         Column(Modifier.fillMaxSize().imePadding()) {
@@ -130,17 +132,10 @@ fun EmailWorld(s: WorldState, a: WorldActions) {
                             drawLine(EmailInk, Offset(3 * k, y), Offset(15 * k, y), 1.6f * k, cap = StrokeCap.Round)
                         }
                     }
-                    EmailIcon({ a.openOptions() }) {
-                        val k = size.width / 18f
-                        val c = Offset(9 * k, 9 * k)
-                        for (i in 0 until 8) {
-                            val ang = i * Math.PI / 4
-                            val dx = cos(ang).toFloat()
-                            val dy = sin(ang).toFloat()
-                            drawLine(EmailInk, Offset(c.x + dx * 5f * k, c.y + dy * 5f * k), Offset(c.x + dx * 8f * k, c.y + dy * 8f * k), 2f * k, cap = StrokeCap.Round)
-                        }
-                        drawCircle(EmailInk, 5f * k, c, style = Stroke(1.6f * k))
-                    }
+                    Text(
+                        "Settings", fontFamily = EmailFont, fontWeight = FontWeight.W600, fontSize = 14.sp, color = EmailBlue,
+                        modifier = Modifier.tap { a.openOptions() }.padding(horizontal = 8.dp, vertical = 8.dp),
+                    )
                 }
                 Row(
                     Modifier.horizontalScroll(rememberScrollState()),
@@ -165,16 +160,38 @@ fun EmailWorld(s: WorldState, a: WorldActions) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(EmailHeadRule))
 
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                // while you talk, your words land as a draft at the top of the inbox
+                if (voice.listening || voice.note.isNotBlank()) {
+                    Row(
+                        Modifier.fillMaxWidth().background(Color(0xFFFFF8F0)).padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            if (voice.listening) "Draft" else "Note", fontFamily = EmailFont, fontWeight = FontWeight.W700,
+                            fontSize = 14.sp, color = EmailRed,
+                        )
+                        Text(
+                            when {
+                                voice.listening && voice.heard.isNotBlank() -> voice.heard + "…"
+                                voice.listening -> "Listening… tap ${s.companion.title}'s photo to stop"
+                                else -> voice.note
+                            },
+                            fontFamily = EmailFont, fontSize = 14.sp, color = EmailSub, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f).padding(start = 10.dp),
+                        )
+                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(EmailRule))
+                }
                 // the companion's email, unread
                 if (showFocusMail) {
                     if (focus != null) {
                         key(focus.id) {
                             EmailSwipe(focus, a, hint = false, onTouched = { touched = true }) {
-                                EmailCompanionMail(s, focus)
+                                EmailCompanionMail(s, focus, voice)
                             }
                         }
                     } else {
-                        EmailCompanionMail(s, null)
+                        EmailCompanionMail(s, null, voice)
                     }
                 }
                 rows.forEachIndexed { i, q ->
@@ -349,7 +366,7 @@ private fun EmailAction(label: String, color: Color, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EmailCompanionMail(s: WorldState, q: Quest?) {
+private fun EmailCompanionMail(s: WorldState, q: Quest?, voice: Voice) {
     val c = s.companion
     Row(
         Modifier
@@ -357,14 +374,14 @@ private fun EmailCompanionMail(s: WorldState, q: Quest?) {
             .background(EmailUnread)
             .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
-        Canvas(Modifier.size(38.dp)) {
-            drawCircle(
-                Brush.radialGradient(
-                    0f to c.cLight, 0.6f to c.c, 1f to c.cDark,
-                    center = Offset(size.width * 0.4f, size.height * 0.35f),
-                    radius = size.width * 0.75f,
-                ),
-                radius = size.width / 2f,
+        // sender photo: your character, in this personality's face. Tap it to talk.
+        Box(
+            Modifier.size(42.dp).clip(CircleShape).background(Color(0xFFEDEFF3)),
+            contentAlignment = Alignment.Center,
+        ) {
+            CharacterArt(
+                size = 40.dp, style = ArtStyle.SHINY, who = c, level = voice.level, listening = voice.listening,
+                glow = false, onTap = { voice.toggle() },
             )
         }
         Column(Modifier.weight(1f).padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {

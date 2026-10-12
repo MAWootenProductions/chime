@@ -70,7 +70,11 @@ object Brain {
             The user just typed a message to you. Decide what they want and call the `respond` tool exactly once.
             - If they're reacting to a reminder ("thanks", "not today", "did it", "remind me later", "push it to friday"), act on the quest being discussed.
               "Don't worry about it today" / "not today" means move it to tomorrow (keep its time if it had one, else all-day).
-            - If they mention new things to do, add them (one add per task, keep the user's words, short).
+              "Not now" / "remind me later" means about 3 hours from now (tomorrow 9am if that's past 10pm). "In a couple of days" = 2 days, "a few days" = 3.
+            - If they mention new things to do, add them (one add per task). Write each task as a short, clean title in their words:
+              drop "remind me to", "I need to", the date/time words and stray punctuation ("Remind me to fix the fence today." -> "Fix the fence", due today).
+              Speech-to-text typos and misspellings are common: read them for what they obviously mean ("tday" = today, "tomorow" = tomorrow).
+            - If they correct the quest being discussed ("no, at 3", "I meant friday", "call it jury letter"), change that quest instead of adding a new one.
             - They can do several things in one message.
             - If it's just chat, take no actions and reply in character.
             - Never invent quests they didn't mention. Never delete unless they clearly ask to drop/cancel it.
@@ -213,19 +217,30 @@ object Brain {
                 return Result(say("Fixed. $name is now $lbl.", "Fixed: $name, $lbl. Typos happen.", "$name now lives at $lbl!", "Sorry about that. $name is $lbl now.", "FIXED. $name. $lbl."), true)
             }
         }
-        if (about != null && Regex("(not today|don'?t worry about (it|this|that)|tomorrow|skip (it|today)|another day|leave it)", I).containsMatchIn(t)) {
-            val tomorrow = LocalDate.now(Time.zone).plusDays(1)
-            val d = about.due
-            val nd = if (d != null && !about.allDay) Time.ms(tomorrow.atTime(Time.ldt(d).toLocalTime())) else Time.ms(tomorrow)
-            QuestStore.upsert(ctx, about.copy(due = nd, allDay = d == null || about.allDay, done = false))
-            return Result(say("Of course. I moved $name to tomorrow. Rest easy.", "Fine. $name is tomorrow's problem now.", "$name has been teleported to tomorrow. Bye for now!", "Okay, tomorrow then. Sorry for bringing it up.", "FINE. TOMORROW. BUT TOMORROW I'M LOUDER."), true)
-        }
-        if (about != null && Regex("^(later|snooze|in a bit|not now|remind me|brb|give me)", I).containsMatchIn(t)) {
-            val p = Parser.parse(raw)
-            val at = p.due ?: (System.currentTimeMillis() + 30 * 60_000L)
-            QuestStore.upsert(ctx, about.copy(due = at, allDay = p.allDay && p.due != null, kind = "at", done = false))
-            val when_ = Time.dueLabel(at, p.allDay && p.due != null, "at").lowercase()
-            return Result(say("Okay, I'll bring $name up again $when_.", "Snoozed $name to $when_. Again.", "$name is napping until $when_. Shh.", "Okay, $when_. Sorry. I'll be quieter.", "$when_. NOT ONE MINUTE LATER."), true)
+        // putting it off, the way a person would say it
+        if (about != null) {
+            val wantsDelay = Regex("(remind me|later|snooze|not now|not right now|not today|don'?t worry|no rush|another day|skip|leave it|push it|move it|bump it|wait|in a bit|give me|busy|tomorrow|next week|weekend|couple|few|days?|hours?|tonight)", I).containsMatchIn(t)
+            if (wantsDelay) {
+                val p = Parser.parse(raw)
+                val zone = Time.zone
+                val nowL = java.time.LocalDateTime.now(zone)
+                val oldTime = about.due?.takeIf { !about.allDay }?.let { Time.ldt(it).toLocalTime() }
+                fun morning(d: LocalDate) = Time.ms(d.atTime(oldTime ?: java.time.LocalTime.of(9, 0)))
+                val (at, allDay) = when {
+                    // a real time or date in what they said wins: "in a couple of days", "friday at 5"
+                    p.due != null -> if (p.allDay) morning(Time.ldt(p.due).toLocalDate()) to false else p.due to false
+                    Regex("(not today|don'?t worry about (it|this|that) today|skip (it )?today|another day|leave it|tomorrow|not for today)", I).containsMatchIn(t) ->
+                        morning(LocalDate.now(zone).plusDays(1)) to false
+                    // "not now", "remind me later", "don't worry about this now": later today, or tomorrow morning if it's late
+                    else -> {
+                        val later = nowL.plusHours(if (Regex("(in a bit|give me a (sec|minute|bit))", I).containsMatchIn(t)) 1 else 3)
+                        (if (later.hour >= 22 || later.toLocalDate() != nowL.toLocalDate()) morning(LocalDate.now(zone).plusDays(1)) else Time.ms(later)) to false
+                    }
+                }
+                QuestStore.upsert(ctx, about.copy(due = at, allDay = allDay, kind = "at", done = false))
+                val w = Time.dueLabel(at, allDay, "at").lowercase()
+                return Result(say("No worries. I'll bring $name up again $w.", "Fine, $name can wait until $w. It's not going anywhere.", "$name is napping until $w. Shh.", "Okay, $w then. Sorry for bugging you.", "FINE. $w. NOT ONE MINUTE LATER."), true)
+            }
         }
         if (about != null && Regex("^(cancel|never ?mind|forget it|drop it|delete)", I).containsMatchIn(t)) {
             QuestStore.delete(ctx, about.id)

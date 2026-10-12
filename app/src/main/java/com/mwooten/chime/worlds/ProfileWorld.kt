@@ -99,6 +99,7 @@ fun ProfileWorld(s: WorldState, a: WorldActions) {
     val scroll by anim.animateFloat(0f, 1f, infiniteRepeatable(tween(8000, easing = LinearEasing)), label = "song")
     val sparkle by anim.animateFloat(0.2f, 1f, infiniteRepeatable(tween(600, easing = LinearEasing), RepeatMode.Reverse), label = "sparkle")
     val postHolder = remember { arrayOfNulls<() -> Unit>(1) }
+    val voice = rememberVoice { heard -> a.spill(heard) }
 
     Column(
         Modifier.fillMaxSize()
@@ -134,7 +135,11 @@ fun ProfileWorld(s: WorldState, a: WorldActions) {
             Text("|", style = link)
             Text("Mail (${s.overdueCount})", style = link, maxLines = 1, modifier = Modifier.tap(a::openLog))
             Text("|", style = link)
-            Text("Settings", style = link, maxLines = 1, modifier = Modifier.tap(a::openOptions))
+            Text(
+                "Settings",
+                style = link.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFE14A), textDecoration = TextDecoration.Underline),
+                maxLines = 1, modifier = Modifier.tap(a::openOptions),
+            )
         }
 
         Column(
@@ -143,24 +148,17 @@ fun ProfileWorld(s: WorldState, a: WorldActions) {
         ) {
             // profile head
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                // profile pic: your character, drawn flat like a scanned sticker. Tap it to talk.
                 Box(
-                    Modifier.size(110.dp).border(3.dp, ProfPink)
+                    Modifier.size(110.dp).border(3.dp, if (voice.listening) ProfGreen else ProfPink)
                         .background(Brush.linearGradient(listOf(Color(0xFF3A1060), Color(0xFF10102A))))
-                        .padding(3.dp)
-                        .tap(a::openOptions),
+                        .padding(3.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Canvas(Modifier.fillMaxSize()) {
-                        val u = size.width / 100f
-                        val body = Color(0xFF5A3A80)
-                        drawCircle(body, radius = 22 * u, center = Offset(50 * u, 44 * u))
-                        drawPath(Path().apply {
-                            moveTo(14 * u, 100 * u); cubicTo(18 * u, 70 * u, 82 * u, 70 * u, 86 * u, 100 * u); close()
-                        }, body)
-                        drawPath(Path().apply {
-                            moveTo(30 * u, 34 * u); cubicTo(34 * u, 14 * u, 70 * u, 14 * u, 72 * u, 36 * u)
-                            cubicTo(60 * u, 28 * u, 42 * u, 28 * u, 30 * u, 34 * u); close()
-                        }, Color(0xFF2A1040))
-                    }
+                    CharacterArt(
+                        96.dp, ArtStyle.FLAT, who = c, level = voice.level, listening = voice.listening,
+                        glow = false, onTap = { voice.toggle() },
+                    )
                     Text(
                         "✦",
                         style = ProfText.copy(fontSize = 14.sp, color = Color.White),
@@ -169,18 +167,28 @@ fun ProfileWorld(s: WorldState, a: WorldActions) {
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.weight(1f)) {
                     Text(
-                        "~*me*~",
+                        "~*${c.title}*~",
                         style = TextStyle(
                             fontFamily = Fonts.pacifico, fontSize = 24.sp, lineHeight = 30.sp, color = ProfPink,
                             shadow = Shadow(ProfPink, Offset.Zero, 16f),
                         ),
                         maxLines = 1,
                     )
-                    Text("\"do it later\" -- me, every time", style = ProfText)
+                    Text(
+                        when {
+                            voice.listening -> "\"" + voice.heard.ifBlank { "..." } + "\""
+                            voice.note.isNotBlank() -> voice.note
+                            else -> "\"do it later\" -- you, every time"
+                        },
+                        style = ProfText, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    )
                     ProfField("Mood:", profMood(s))
-                    ProfField("Quests:", "${s.open.size} open, ${s.done.size} done")
+                    ProfField("To-dos:", "${s.open.size} open, ${s.done.size} done")
                     ProfField("Last login:", Time.time(s.now))
-                    Text("● Online Now!", style = ProfText.copy(color = ProfGreen, fontWeight = FontWeight.Bold))
+                    Text(
+                        if (voice.listening) "● Listening… (tap pic to stop)" else "● Online Now! (tap pic to talk)",
+                        style = ProfText.copy(color = ProfGreen, fontWeight = FontWeight.Bold),
+                    )
                 }
             }
 
@@ -204,7 +212,7 @@ fun ProfileWorld(s: WorldState, a: WorldActions) {
             // Top 8 = your top 8 open quests
             Column(Modifier.fillMaxWidth().border(1.dp, ProfPink).background(Color(0xD9140028))) {
                 Text(
-                    "My Top 8 (quests)",
+                    "My Top 8 (to-dos)",
                     style = ProfText.copy(color = Color(0xFF10001A), fontWeight = FontWeight.Bold),
                     modifier = Modifier.fillMaxWidth().background(ProfPink).padding(horizontal = 6.dp, vertical = 3.dp),
                 )
@@ -227,13 +235,13 @@ fun ProfileWorld(s: WorldState, a: WorldActions) {
                     style = ProfText.copy(color = Color.White, fontWeight = FontWeight.Bold),
                     modifier = Modifier.fillMaxWidth().background(ProfBlue).padding(horizontal = 6.dp, vertical = 3.dp),
                 )
-                ProfComment(c, s.now, s.line, divider = true)
+                ProfComment(c, s.now, s.line, divider = true, mine = true)
                 val otherLine = when {
                     s.open.size > 1 -> other.line(s.open[1], s.now)
                     first != null -> other.line(first, s.now)
                     else -> other.emptyLine
                 }
-                ProfComment(other, s.now - 4 * 60_000L, otherLine, divider = false)
+                ProfComment(other, s.now - 4 * 60_000L, otherLine, divider = false, mine = false)
             }
         }
 
@@ -267,9 +275,9 @@ fun ProfileWorld(s: WorldState, a: WorldActions) {
             Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            if (first != null) ProfButton("Mark #1 done", ProfGreen, Modifier.weight(1f)) { a.done(first) }
-            ProfButton(if (adding) "Cancel" else "Add a quest", ProfCyan, Modifier.weight(1f)) { adding = !adding }
-            ProfButton("Edit Top 8", ProfPink, Modifier.weight(1f), onClick = a::openLog)
+            if (first != null) ProfButton("#1 Done ✓", ProfGreen, Modifier.weight(1f)) { a.done(first) }
+            ProfButton(if (adding) "Cancel" else "Add a to-do", ProfCyan, Modifier.weight(1f)) { adding = !adding }
+            ProfButton("Full list", ProfPink, Modifier.weight(1f), onClick = a::openLog)
         }
     }
 }
@@ -320,7 +328,7 @@ private fun ProfTile(q: Quest?, i: Int, now: Long, modifier: Modifier, a: WorldA
 }
 
 @Composable
-private fun ProfComment(who: com.mwooten.chime.data.Companion, at: Long, text: String, divider: Boolean) {
+private fun ProfComment(who: com.mwooten.chime.data.Companion, at: Long, text: String, divider: Boolean, mine: Boolean) {
     Row(
         Modifier.fillMaxWidth().drawBehind {
             if (divider) {
@@ -334,11 +342,18 @@ private fun ProfComment(who: com.mwooten.chime.data.Companion, at: Long, text: S
         }.padding(8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Box(
-            Modifier.size(40.dp)
-                .background(Brush.radialGradient(listOf(who.cLight, who.c, who.cDark)))
-                .border(2.dp, who.c)
-        )
+        if (mine) {
+            // your character's own comment wears the same flat sticker as the profile pic
+            Box(Modifier.size(40.dp).background(Color(0xFF10102A)).border(2.dp, who.c), contentAlignment = Alignment.Center) {
+                CharacterArt(34.dp, ArtStyle.FLAT, who = who, glow = false)
+            }
+        } else {
+            Box(
+                Modifier.size(40.dp)
+                    .background(Brush.radialGradient(listOf(who.cLight, who.c, who.cDark)))
+                    .border(2.dp, who.c)
+            )
+        }
         Text(
             buildAnnotatedString {
                 withStyle(SpanStyle(color = who.c, fontWeight = FontWeight.Bold)) { append(who.title) }

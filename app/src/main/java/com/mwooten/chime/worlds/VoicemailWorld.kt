@@ -107,6 +107,7 @@ fun VoicemailWorld(s: WorldState, a: WorldActions) {
     val q: Quest? = msgs.getOrNull(i)
     val line = q?.let { s.companion.line(it, s.now) } ?: s.line
     val clock = rememberClock()
+    val voice = rememberVoice { heard -> a.spill(heard) }
 
     Box(Modifier.fillMaxSize().background(VmBg)) {
         Column(
@@ -126,8 +127,12 @@ fun VoicemailWorld(s: WorldState, a: WorldActions) {
                     "${msgs.size} new",
                     style = TextStyle(fontFamily = Fonts.barlow, fontSize = 13.sp, color = VmMuted),
                 )
-                Spacer(Modifier.width(10.dp))
-                VmMenuButton(onClick = a::openOptions)
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "Settings",
+                    style = TextStyle(fontFamily = Fonts.barlow, fontWeight = FontWeight.W600, fontSize = 15.sp, color = Color(0xFF8AB0F0)),
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).tap { a.openOptions() }.padding(horizontal = 8.dp, vertical = 8.dp),
+                )
             }
 
             // the robotic greeting + the message card scroll if space runs out
@@ -159,12 +164,22 @@ fun VoicemailWorld(s: WorldState, a: WorldActions) {
                     modifier = Modifier.padding(horizontal = 6.dp),
                 )
                 Spacer(Modifier.height(18.dp))
-                VmMessageCard(s, q, line, clock, onOpen = { q?.let(a::openQuest) })
+                VmMessageCard(s, q, line, clock, voice, onOpen = { q?.let(a::openQuest) })
                 Spacer(Modifier.height(16.dp))
             }
 
-            // prompt or the star-key spill line
-            if (spilling) {
+            // prompt, live recording, or the star-key spill line
+            if (voice.listening) {
+                Text(
+                    buildAnnotatedString {
+                        withStyle(SpanStyle(color = Color(0xFFE5534B))) { append("● REC  ") }
+                        append(if (voice.heard.isNotBlank()) voice.heard + "…" else "Speak after the tone. Tap the caller to stop.")
+                    },
+                    style = TextStyle(fontFamily = Fonts.barlow, fontSize = 15.sp, lineHeight = 20.sp, color = VmText, textAlign = TextAlign.Center),
+                    maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
+                )
+            } else if (spilling) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 6.dp)
                         .clip(RoundedCornerShape(14.dp)).background(Color(0xFF20283A))
@@ -193,6 +208,12 @@ fun VoicemailWorld(s: WorldState, a: WorldActions) {
                         modifier = Modifier.tap { spilling = false }.padding(horizontal = 8.dp, vertical = 8.dp),
                     )
                 }
+            } else if (voice.note.isNotBlank()) {
+                Text(
+                    voice.note,
+                    style = TextStyle(fontFamily = Fonts.barlow, fontSize = 13.sp, lineHeight = 18.sp, color = VmMuted, textAlign = TextAlign.Center),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
+                )
             } else {
                 Text(
                     if (q != null) "“To mark done, press 7. To save for later, press 9. To leave yourself a new one, press star. For all messages, press 1.”"
@@ -223,7 +244,7 @@ fun VoicemailWorld(s: WorldState, a: WorldActions) {
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     VmKey("*", "SPILL", Color(0xFF20283A), Color(0xFF8AB0F0)) { spilling = !spilling }
-                    VmKey("0", "MENU", VmKeyBg, VmMuted) { a.openOptions() }
+                    VmKey("0", "SETTINGS", VmKeyBg, VmMuted) { a.openOptions() }
                     VmKey("#", "NEXT", VmKeyBg, VmMuted, enabled = msgs.size > 1) { index = i + 1 }
                 }
             }
@@ -232,7 +253,7 @@ fun VoicemailWorld(s: WorldState, a: WorldActions) {
 }
 
 @Composable
-private fun VmMessageCard(s: WorldState, q: Quest?, line: String, clock: State<Float>, onOpen: () -> Unit) {
+private fun VmMessageCard(s: WorldState, q: Quest?, line: String, clock: State<Float>, voice: Voice, onOpen: () -> Unit) {
     val comp = s.companion
     val total = vmSeconds(line)
     val urgent = q != null && q.shelf(s.now).let { it == Shelf.OVERDUE || it == Shelf.TODAY }
@@ -247,19 +268,24 @@ private fun VmMessageCard(s: WorldState, q: Quest?, line: String, clock: State<F
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            val c = comp.c; val cl = comp.cLight; val cd = comp.cDark
-            Canvas(Modifier.size(36.dp)) {
-                drawCircle(
-                    Brush.radialGradient(
-                        0f to cl, 0.55f to c, 1f to cd,
-                        center = Offset(size.width * 0.4f, size.height * 0.35f),
-                        radius = size.width * 0.75f,
-                    ),
+            // caller art: your character, in its own clipped tile inside the card so it can never
+            // drift over the keypad or the controls. Tap it to record a new message.
+            Box(
+                Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)).background(VmKeyBg),
+                contentAlignment = Alignment.Center,
+            ) {
+                CharacterArt(
+                    size = 58.dp, style = ArtStyle.SHINY, level = voice.level, listening = voice.listening,
+                    glow = false, onTap = { voice.toggle() },
                 )
             }
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(comp.title, style = TextStyle(fontFamily = Fonts.barlow, fontWeight = FontWeight.W700, fontSize = 16.sp, color = VmText))
+                Text(
+                    if (voice.listening) "recording… tap to stop" else "tap to leave a message",
+                    style = TextStyle(fontFamily = Fonts.barlow, fontSize = 11.sp, color = if (voice.listening) Color(0xFFE5534B) else VmFaint),
+                )
                 Text(
                     if (q != null) "${vmClock(total)} · re: ${q.text}" else "${vmClock(total)} · greeting",
                     style = TextStyle(fontFamily = Fonts.barlow, fontSize = 12.sp, color = VmMuted),
@@ -360,24 +386,6 @@ private fun VmKey(
                 style = TextStyle(fontFamily = Fonts.barlow, fontWeight = FontWeight.W700, fontSize = 10.sp, lineHeight = 11.sp, letterSpacing = 1.sp, color = labelColor),
                 modifier = Modifier.padding(top = 2.dp),
             )
-        }
-    }
-}
-
-/** Three stacked lines: the phone app's menu. */
-@Composable
-private fun VmMenuButton(onClick: () -> Unit) {
-    Box(
-        Modifier.size(34.dp).clip(CircleShape).background(VmKeyBg).tap(onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Canvas(Modifier.size(16.dp)) {
-            val w = size.width
-            val th = 2.dp.toPx()
-            for (k in 0..2) {
-                val y = size.height * (0.2f + 0.3f * k)
-                drawRoundRect(VmMuted, topLeft = Offset(0f, y - th / 2), size = Size(w, th), cornerRadius = CornerRadius(th / 2, th / 2))
-            }
         }
     }
 }

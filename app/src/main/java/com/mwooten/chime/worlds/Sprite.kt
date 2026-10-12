@@ -1,6 +1,7 @@
 package com.mwooten.chime.worlds
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.media.AudioAttributes
 import android.media.SoundPool
 import androidx.compose.foundation.Canvas
@@ -22,9 +23,13 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
@@ -32,17 +37,24 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import com.mwooten.chime.R
 import com.mwooten.chime.data.Companion
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.max
+import kotlin.math.round
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.random.Random
+import androidx.compose.ui.graphics.Canvas as GfxCanvas
 
 /**
  * The bell: anything that saves or finishes a task "strikes" the drop. The drop ripples top to
@@ -84,6 +96,26 @@ fun Character(
     listening: Boolean,
     size: Dp,
     draggable: Boolean = true,
+    modifier: Modifier = Modifier,
+    onTap: () -> Unit,
+) {
+    CharacterView(look, finish, who, level, listening, size, draggable, modifier, ArtStyle.SHINY, true, 32, onTap)
+}
+
+/** [Character] in any [ArtStyle]; [glow] = false drops halo and floor shadow, [pixels] is the PIXEL grid. */
+@Composable
+internal fun CharacterView(
+    look: Look,
+    finish: Finish,
+    who: Companion,
+    level: Float,
+    listening: Boolean,
+    size: Dp,
+    draggable: Boolean,
+    modifier: Modifier,
+    style: ArtStyle,
+    showGlow: Boolean,
+    pixels: Int,
     onTap: () -> Unit,
 ) {
     var time by remember { mutableFloatStateOf(0f) }
@@ -121,6 +153,7 @@ fun Character(
     }
 
     val tone = remember(finish) { Tone(finish) }
+    val lowRes = remember { LowRes() }
     val drag = if (draggable) Modifier.pointerInput(Unit) {
         detectDragGestures(onDragStart = { dragging = 1f }, onDragEnd = { dragging = 0f }, onDragCancel = { dragging = 0f }) { change, d ->
             change.consume(); px += d.x * .8f; py += d.y * .8f
@@ -128,33 +161,67 @@ fun Character(
     } else Modifier
 
     val mood = moodOf(who)
-    Canvas(Modifier.size(size)
+    Canvas(modifier.size(size)
         .graphicsLayer { alpha = if (mood.flicker && sin(time * 7f) > .93f) .55f else 1f }
         .pointerInput(Unit) { detectTapGestures(onTap = { tap() }) }.then(drag)) {
-        val w = this.size.width; val h = this.size.height
-        // personality motion on top of the look's own float: Pip hops, Blaze can't sit still, Dim shrinks
-        val hop = if (who == Companion.PIP) -abs(sin(time * 3f)) * h * .05f else 0f
-        val jit = if (mood.jitter > 0f) mood.jitter * w / 300f else 0f
-        val jx = if (jit > 0f) (Random.nextFloat() - .5f) * jit else 0f
-        val jy = if (jit > 0f) (Random.nextFloat() - .5f) * jit else 0f
-        translate(jx, hop + jy) { scale(mood.size, mood.size, pivot = Offset(w / 2f, h * .5f)) {
-        val p = Pose(
-            t = mt, k = chime, who = who, listening = curListening, lvl = lvl,
-            grow = 1f + hear * (.08f + lvl * .12f),
-            dx = px, dy = py + hear * h * .02f,
-            flapBoost = 1f + hear * .5f,
-        )
-        when (look) {
-            Look.STAR -> drawStar(p, tone)
-            Look.SPRITE -> drawSprite(p, tone)
-            Look.MOTH -> drawMoth(p, tone)
-            Look.EMBER -> drawEmber(p, tone)
-            Look.BUBBLE -> drawBubble(p, tone)
-            Look.PUFF -> drawPuff(p, tone)
+        if (style != ArtStyle.PIXEL) {
+            scene(look, tone, who, mt, chime, time, curListening, lvl, hear, px, py, style, showGlow)
+        } else {
+            // retro sprite: ~8 fps, drawn flat on a tiny grid, outlined, then blown up without smoothing
+            val n = pixels.coerceIn(8, 256)
+            val sc = n / this.size.width
+            val step = { v: Float -> floor(v * 8f) / 8f }
+            lowRes.render(this, n, tone.dark.toArgb()) {
+                scene(look, tone, who, step(mt), step(chime), step(time), curListening, lvl, hear, px * sc, py * sc, ArtStyle.PIXEL, showGlow)
+            }
+            drawImage(
+                lowRes.image,
+                srcOffset = IntOffset.Zero, srcSize = IntSize(n, n),
+                dstOffset = IntOffset.Zero, dstSize = IntSize(this.size.width.roundToInt(), this.size.height.roundToInt()),
+                filterQuality = FilterQuality.None,
+            )
         }
-        } }
     }
 }
+
+/** The small offscreen grid a PIXEL character is drawn into, reused frame to frame. */
+private class LowRes {
+    private var n = 0
+    private var bmp: Bitmap? = null
+    lateinit var image: ImageBitmap
+    private lateinit var canvas: GfxCanvas
+    private var buf = IntArray(0)
+    private var out = IntArray(0)
+    private val scope = CanvasDrawScope()
+
+    fun render(density: DrawScope, size: Int, outline: Int, block: DrawScope.() -> Unit) {
+        if (size != n || bmp == null) {
+            n = size
+            val b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            bmp = b; image = b.asImageBitmap(); canvas = GfxCanvas(image)
+            buf = IntArray(size * size); out = IntArray(size * size)
+        }
+        val b = bmp!!
+        b.eraseColor(0)
+        scope.draw(density, LayoutDirection.Ltr, canvas, Size(n.toFloat(), n.toFloat())) { block() }
+        // hard edges: every pixel is either solid or empty
+        b.getPixels(buf, 0, n, 0, 0, n, n)
+        for (i in buf.indices) buf[i] = if ((buf[i] ushr 24) >= 100) buf[i] or OPAQUE else 0
+        // a 1-px dark outline around the silhouette, like classic 8/16-bit sprites
+        for (y in 0 until n) for (x in 0 until n) {
+            val i = y * n + x
+            out[i] = when {
+                buf[i] != 0 -> buf[i]
+                (x > 0 && buf[i - 1] != 0) || (x < n - 1 && buf[i + 1] != 0) ||
+                    (y > 0 && buf[i - n] != 0) || (y < n - 1 && buf[i + n] != 0) -> outline or OPAQUE
+                else -> 0
+            }
+        }
+        b.setPixels(out, 0, n, 0, 0, n, n)
+    }
+}
+
+private const val OPAQUE = -0x1000000 // 0xFF000000
 
 /** How each personality carries itself: time speed, jitter (px at 300 wide), size, flicker. */
 private class Mood(val speed: Float, val jitter: Float, val size: Float, val flicker: Boolean)
@@ -173,6 +240,45 @@ private fun moodOf(c: Companion): Mood = when (c) {
     Companion.BLAZE -> MoodBlaze
 }
 
+/** One frame of the character: personality motion (Pip hops, Blaze can't sit still, Dim shrinks) over the look's own float. */
+private fun DrawScope.scene(
+    look: Look, f: Tone, who: Companion, t: Float, k: Float, time: Float,
+    listening: Boolean, lvl: Float, hear: Float, dx: Float, dy: Float, art: ArtStyle, showGlow: Boolean,
+) {
+    val w = size.width; val h = size.height
+    val mood = moodOf(who)
+    val pixel = art == ArtStyle.PIXEL
+    var hop = if (who == Companion.PIP) -abs(sin(time * 3f)) * h * .05f else 0f
+    var jx = 0f; var jy = 0f
+    if (mood.jitter > 0f) {
+        if (pixel) {
+            val rnd = Random(floor(time * 8f).toInt())
+            jx = (rnd.nextInt(3) - 1).toFloat(); jy = (rnd.nextInt(3) - 1).toFloat()
+        } else {
+            val jit = mood.jitter * w / 300f
+            jx = (Random.nextFloat() - .5f) * jit; jy = (Random.nextFloat() - .5f) * jit
+        }
+    }
+    if (pixel) hop = round(hop)
+    translate(jx, hop + jy) { scale(mood.size, mood.size, pivot = Offset(w / 2f, h * .5f)) {
+        val p = Pose(
+            t = t, k = k, who = who, listening = listening, lvl = lvl,
+            grow = 1f + hear * (.08f + lvl * .12f),
+            dx = dx, dy = dy + hear * h * .02f,
+            flapBoost = 1f + hear * .5f,
+            art = art, glow = showGlow,
+        )
+        when (look) {
+            Look.STAR -> drawStar(p, f)
+            Look.SPRITE -> drawSprite(p, f)
+            Look.MOTH -> drawMoth(p, f)
+            Look.EMBER -> drawEmber(p, f)
+            Look.BUBBLE -> drawBubble(p, f)
+            Look.PUFF -> drawPuff(p, f)
+        }
+    } }
+}
+
 /* ---------------- drawing (ported from the colors preview) ---------------- */
 
 private const val TAU = 6.2831855f
@@ -181,11 +287,20 @@ private const val DEG = 57.29578f
 private val FaceInk = Color(0xFF2A2233)
 private val Clear = Color.White.copy(alpha = 0f)
 
-/** One frame's state: time, chime strike (1 → 0), mood, listening, size boost, drag offset. */
+/** One frame's state: time, chime strike (1 → 0), mood, listening, size boost, drag offset, style. */
 private class Pose(
     val t: Float, val k: Float, val who: Companion, val listening: Boolean, val lvl: Float,
     val grow: Float, val dx: Float, val dy: Float, val flapBoost: Float,
-)
+    val art: ArtStyle, val glow: Boolean,
+) {
+    /** No gradients or gleam (FLAT and PIXEL). */
+    val flat get() = art != ArtStyle.SHINY
+    /** Pen outlines (FLAT only; PIXEL gets its outline from the grid). */
+    val ink get() = art == ArtStyle.FLAT
+    val pixel get() = art == ArtStyle.PIXEL
+    /** Snap a position to whole low-res pixels in PIXEL. */
+    fun q(v: Float) = if (pixel) round(v) else v
+}
 
 private class Tone(f: Finish) {
     val c = Color(f.c)
@@ -226,27 +341,66 @@ private fun DrawScope.sheen(path: Path, f: Tone, x: Float, y: Float, r: Float, t
 private fun bodyGrad(f: Tone, x: Float, y: Float, r: Float): Brush =
     Brush.radialGradient(0f to Color.White, .06f to Color.White, .45f to f.light, 1f to f.c, center = Offset(x - r * .3f, y - r * .35f), radius = r * 1.4f)
 
-private fun DrawScope.glow(x: Float, y: Float, r: Float, col: Color, a: Float) {
+/** Pen width for FLAT outlines (drawn under the fill, so half of it shows: about r * .08 on the star). */
+private fun DrawScope.ink() = size.width * .028f
+
+/** A flat shape: outline underneath (FLAT), then a solid fill. */
+private fun DrawScope.flatFill(path: Path, p: Pose, f: Tone, col: Color) {
+    if (p.ink) drawPath(path, f.dark, style = Stroke(ink(), join = StrokeJoin.Round))
+    drawPath(path, col)
+}
+
+/** A flat highlight: one light blob near the top left, clipped to the shape. */
+private fun DrawScope.spot(path: Path, x: Float, y: Float, r: Float, col: Color) {
+    clipPath(path) {
+        val sx = x - r * .38f; val sy = y - r * .42f
+        rotate(-35f, pivot = Offset(sx, sy)) {
+            val e = ovalRect(sx, sy, r * .3f, r * .17f)
+            drawOval(col, e.topLeft, e.size)
+        }
+    }
+}
+
+/** A body: glossy gradient and gleam when shiny; flat fill, outline and highlight blob otherwise. */
+private fun DrawScope.fill(path: Path, p: Pose, f: Tone, x: Float, y: Float, r: Float, col: Color = f.c) {
+    if (!p.flat) { drawPath(path, bodyGrad(f, x, y, r)); sheen(path, f, x, y, r, p.t); return }
+    flatFill(path, p, f, col)
+    spot(path, x, y, r, if (col == f.light) Color.White else f.light)
+}
+
+/** The soft halo; shiny only, and only when glowing. */
+private fun DrawScope.halo(p: Pose, x: Float, y: Float, r: Float, col: Color, a: Float) {
+    if (p.flat || !p.glow) return
     val o = Offset(x, y)
     drawCircle(Brush.radialGradient(listOf(col.copy(alpha = a.coerceIn(0f, 1f)), col.copy(alpha = 0f)), o, r), r, o)
 }
 
-private fun DrawScope.shadow(x: Float, fy: Float, r: Float, lift: Float, col: Color) {
+/** Floor shadow (already a flat ellipse); off when not glowing and in PIXEL. */
+private fun DrawScope.shadow(p: Pose, x: Float, fy: Float, r: Float, lift: Float, col: Color) {
+    if (!p.glow || p.pixel) return
     val a = max(0f, .22f - lift * .12f)
     if (a <= 0f) return
     val e = ovalRect(x, fy, r * max(.4f, 1.5f - lift), r * max(.05f, .28f - lift * .12f))
     drawOval(col.copy(alpha = a), e.topLeft, e.size)
 }
 
-private fun DrawScope.burst(x: Float, y: Float, r: Float, t: Float, k: Float) {
+/** The chime sparkle: white dots (shiny), pen dashes (flat), single pixels (pixel). */
+private fun DrawScope.burst(p: Pose, f: Tone, x: Float, y: Float, r: Float) {
+    val t = p.t; val k = p.k
     if (k <= 0f) return
     for (i in 0 until 8) {
         val a = i / 8f * TAU + t; val d = r * (1.4f + (1 - k) * 1.6f)
-        drawCircle(Color.White.copy(alpha = k.coerceIn(0f, 1f)), r * .06f, Offset(x + cos(a) * d, y + sin(a) * d))
+        val ox = x + cos(a) * d; val oy = y + sin(a) * d
+        when {
+            p.pixel -> drawRect(f.light, Offset(round(ox), round(oy)), Size(1f, 1f))
+            p.flat -> drawLine(f.dark.copy(alpha = k.coerceIn(0f, 1f)), Offset(ox, oy), Offset(ox + cos(a) * r * .25f, oy + sin(a) * r * .25f), ink() * .5f, StrokeCap.Round)
+            else -> drawCircle(Color.White.copy(alpha = k.coerceIn(0f, 1f)), r * .06f, Offset(ox, oy))
+        }
     }
 }
 
 private fun DrawScope.face(x0: Float, y0: Float, r: Float, p: Pose, f: Tone) {
+    if (p.pixel) { pixelFace(x0, y0, r, p); return }
     val t = p.t; val m = p.who; val happy = p.k > .05f
     val lookX = if (p.listening) 0f else sin(t * .7f) * r * .06f
     val lookY = (if (m == Companion.DIM) r * .08f else 0f) + (if (p.listening) r * .07f else 0f)
@@ -286,6 +440,34 @@ private fun DrawScope.face(x0: Float, y0: Float, r: Float, p: Pose, f: Tone) {
     }
 }
 
+/** The same face placed pixel by pixel, so it stays readable on a tiny grid. */
+private fun DrawScope.pixelFace(x0: Float, y0: Float, r: Float, p: Pose) {
+    val m = p.who; val happy = p.k > .05f
+    val blink = (p.t % 3.6f) < .12f
+    fun dot(x: Float, y: Float, w: Float = 1f, h: Float = 1f, c: Color = FaceInk) = drawRect(c, Offset(x, y), Size(w, h))
+    val e = max(1f, round(r * .2f))
+    val d = max(1f, round(r * .34f))
+    val cx = round(x0)
+    val ey = round(y0 - r * .15f + (if (m == Companion.DIM || p.listening) 1f else 0f))
+    val eh = if (happy || blink) 1f else e + 1f
+    val lx = cx - d - (e - 1f); val rx = cx + d
+    dot(lx, ey, e, eh); dot(rx, ey, e, eh)
+    val my = ey + eh + max(1f, round(r * .18f))
+    if (r >= 4f) {
+        val pink = Color(255, 130, 150)
+        dot(lx - 1f, my - 1f, c = pink); dot(rx + e, my - 1f, c = pink)
+    }
+    val half = max(1f, round(r * .2f))
+    val left = cx - half; val wide = half * 2f + 1f
+    when {
+        p.listening -> { val s = max(1f, round(r * .16f)); dot(cx - floor((s - 1f) / 2f), my, s, s + round(p.lvl * r * .2f)) }
+        happy || m == Companion.PIP || m == Companion.WREN -> { dot(left, my); dot(left + wide - 1f, my); dot(left + 1f, my + 1f, wide - 2f) }
+        m == Companion.DIM -> { dot(left + 1f, my, wide - 2f); dot(left, my + 1f); dot(left + wide - 1f, my + 1f) }
+        m == Companion.FIZZ -> { dot(left, my + 1f, wide - 1f); dot(left + wide - 1f, my) }
+        else -> dot(left, my, wide)
+    }
+}
+
 private fun circlePath(x: Float, y: Float, r: Float) = Path().apply { addOval(Rect(Offset(x, y), r)) }
 
 /* ---------------- the six looks ---------------- */
@@ -293,12 +475,12 @@ private fun circlePath(x: Float, y: Float, r: Float) = Path().apply { addOval(Re
 private fun DrawScope.drawStar(p: Pose, f: Tone) {
     val w = size.width; val h = size.height; val t = p.t; val k = p.k
     val r = w * .17f * p.grow
-    val x = w / 2 + sin(t * .8f) * w * .05f + p.dx
-    val y = h * .46f + sin(t * 1.6f) * h * .03f - k * h * .06f + p.dy
+    val x = p.q(w / 2 + sin(t * .8f) * w * .05f + p.dx)
+    val y = p.q(h * .46f + sin(t * 1.6f) * h * .03f - k * h * .06f + p.dy)
     val rot = sin(t * .9f) * .12f + k * TAU * (1 - k)
-    shadow(x, h * .86f, r * .8f, (h * .86f - y) / h, f.c)
-    glow(x, y, r * 2.6f, f.c, .45f + k * .4f)
-    for (i in 0 until 12) {
+    shadow(p, x, h * .86f, r * .8f, (h * .86f - y) / h, f.c)
+    halo(p, x, y, r * 2.6f, f.c, .45f + k * .4f)
+    if (!p.flat && p.glow) for (i in 0 until 12) {
         val a = t * .5f + i * 1.3f; val d = r * (1.6f + (i % 3) * .3f)
         drawCircle(f.light.copy(alpha = (.25f + .25f * sin(t * 3 + i)).coerceIn(0f, 1f)), r * .035f, Offset(x - d * .3f + cos(a) * r * .2f, y + d * .5f))
     }
@@ -312,22 +494,30 @@ private fun DrawScope.drawStar(p: Pose, f: Tone) {
                 }
                 close()
             }
-            drawPath(star, f.light, style = Stroke(r * .32f, join = StrokeJoin.Round))
-            drawPath(star, bodyGrad(f, 0f, 0f, r))
-            sheen(star, f, 0f, 0f, r, t)
+            if (p.flat) {
+                // the fat round stroke keeps the soft points; the ink rides just outside it
+                if (p.ink) drawPath(star, f.dark, style = Stroke(r * .32f + ink(), join = StrokeJoin.Round))
+                drawPath(star, f.c, style = Stroke(r * .32f, join = StrokeJoin.Round))
+                drawPath(star, f.c)
+                spot(star, 0f, 0f, r, f.light)
+            } else {
+                drawPath(star, f.light, style = Stroke(r * .32f, join = StrokeJoin.Round))
+                drawPath(star, bodyGrad(f, 0f, 0f, r))
+                sheen(star, f, 0f, 0f, r, t)
+            }
         }
     }
     face(x, y + r * .05f, r * .62f, p, f)
-    burst(x, y, r * .9f, t, k)
+    burst(p, f, x, y, r * .9f)
 }
 
 private fun DrawScope.drawSprite(p: Pose, f: Tone) {
     val w = size.width; val h = size.height; val t = p.t; val k = p.k
     val r = w * .13f * p.grow
-    val x = w / 2 + sin(t * .8f) * w * .05f + p.dx
-    val y = h * .46f + sin(t * 1.6f) * h * .025f - k * h * .06f + p.dy
-    shadow(x, h * .86f, r, (h * .86f - y) / h, f.c)
-    glow(x, y, r * 3.2f, f.c, .45f + k * .4f)
+    val x = p.q(w / 2 + sin(t * .8f) * w * .05f + p.dx)
+    val y = p.q(h * .46f + sin(t * 1.6f) * h * .025f - k * h * .06f + p.dy)
+    shadow(p, x, h * .86f, r, (h * .86f - y) / h, f.c)
+    halo(p, x, y, r * 3.2f, f.c, .45f + k * .4f)
     val flap = .55f + .45f * abs(sin(t * 16f * p.flapBoost))
     val wings = listOf(floatArrayOf(.75f, 1.35f, .62f, -.35f), floatArrayOf(-.1f, .9f, .4f, .2f))
     for (wing in wings) {
@@ -339,28 +529,30 @@ private fun DrawScope.drawSprite(p: Pose, f: Tone) {
                         val cx = sd * len * r * .55f; val cy = -len * r * .32f
                         rotate(sd * -.5f * DEG, pivot = Offset(cx, cy)) {
                             val e = ovalRect(cx, cy, len * r * .62f, wid * r)
-                            drawOval(Color.White.copy(alpha = .5f), e.topLeft, e.size)
-                            drawOval(Color.White.copy(alpha = .8f), e.topLeft, e.size, style = Stroke(r * .03f))
+                            if (p.flat) {
+                                flatFill(Path().apply { addOval(e) }, p, f, f.light)
+                            } else {
+                                drawOval(Color.White.copy(alpha = .5f), e.topLeft, e.size)
+                                drawOval(Color.White.copy(alpha = .8f), e.topLeft, e.size, style = Stroke(r * .03f))
+                            }
                         }
                     }
                 }
             }
         }
     }
-    val body = circlePath(x, y, r)
-    drawPath(body, bodyGrad(f, x, y, r))
-    sheen(body, f, x, y, r, t)
+    fill(circlePath(x, y, r), p, f, x, y, r)
     face(x, y, r, p, f)
-    burst(x, y, r, t, k)
+    burst(p, f, x, y, r)
 }
 
 private fun DrawScope.drawMoth(p: Pose, f: Tone) {
     val w = size.width; val h = size.height; val t = p.t; val k = p.k
     val r = w * .1f * p.grow
-    val x = w / 2 + sin(t * .9f) * w * .06f + p.dx
-    val y = h * .47f + sin(t * 1.8f) * h * .03f - k * h * .06f + p.dy
-    shadow(x, h * .86f, r, (h * .86f - y) / h, f.c)
-    glow(x, y + r * .4f, r * 3.4f, f.c, .5f + k * .4f)
+    val x = p.q(w / 2 + sin(t * .9f) * w * .06f + p.dx)
+    val y = p.q(h * .47f + sin(t * 1.8f) * h * .03f - k * h * .06f + p.dy)
+    shadow(p, x, h * .86f, r, (h * .86f - y) / h, f.c)
+    halo(p, x, y + r * .4f, r * 3.4f, f.c, .5f + k * .4f)
     val flap = .5f + .5f * abs(sin(t * 9f * p.flapBoost))
     for (sd in listOf(-1f, 1f)) {
         translate(x, y) {
@@ -371,15 +563,20 @@ private fun DrawScope.drawMoth(p: Pose, f: Tone) {
                     cubicTo(r * 1.8f, r * .6f, r * .8f, r * .3f, r * .3f, r * .2f)
                     close()
                 }
-                drawPath(upper, f.light.copy(alpha = .92f))
-                sheen(upper, f, r * 1.6f, -r * .6f, r * 1.2f, t)
                 val lower = Path().apply {
                     moveTo(r * .3f, r * .3f)
                     cubicTo(r * 1.4f, r * .6f, r * 1.9f, r * 1.6f, r * 1.1f, r * 1.9f)
                     cubicTo(r * .6f, r * 1.7f, r * .4f, r * 1.0f, r * .3f, r * .4f)
                     close()
                 }
-                drawPath(lower, f.c.copy(alpha = .8f))
+                if (p.flat) {
+                    flatFill(upper, p, f, f.light)
+                    flatFill(lower, p, f, f.c)
+                } else {
+                    drawPath(upper, f.light.copy(alpha = .92f))
+                    sheen(upper, f, r * 1.6f, -r * .6f, r * 1.2f, t)
+                    drawPath(lower, f.c.copy(alpha = .8f))
+                }
                 drawCircle(f.dark, r * .28f, Offset(r * 1.8f, -r * .6f))
                 drawCircle(Color.White, r * .1f, Offset(r * 1.75f, -r * .65f))
                 val vein = Stroke(r * .06f, cap = StrokeCap.Round)
@@ -392,26 +589,32 @@ private fun DrawScope.drawMoth(p: Pose, f: Tone) {
         }
     }
     val by = y + r * .55f
-    val body = Path().apply { addOval(ovalRect(x, by, r * .6f, r * 1.05f)) }
-    drawPath(body, bodyGrad(f, x, by, r * 1.05f))
-    sheen(body, f, x, by, r, t)
+    if (p.flat) fill(Path().apply { addOval(ovalRect(x, by, r * .6f, r * 1.05f)) }, p, f, x, by, r * 1.05f)
+    else {
+        val body = Path().apply { addOval(ovalRect(x, by, r * .6f, r * 1.05f)) }
+        drawPath(body, bodyGrad(f, x, by, r * 1.05f))
+        sheen(body, f, x, by, r, t)
+    }
     val hy = y - r * .35f
-    drawCircle(f.light, r * .78f, Offset(x, hy))
-    for (i in 0 until 14) {
-        val a = i / 14f * TAU
-        drawCircle(Color.White.copy(alpha = .5f), r * .1f, Offset(x + cos(a) * r * .74f, hy + sin(a) * r * .74f))
+    if (p.flat) fill(circlePath(x, hy, r * .78f), p, f, x, hy, r * .78f, f.light)
+    else {
+        drawCircle(f.light, r * .78f, Offset(x, hy))
+        for (i in 0 until 14) {
+            val a = i / 14f * TAU
+            drawCircle(Color.White.copy(alpha = .5f), r * .1f, Offset(x + cos(a) * r * .74f, hy + sin(a) * r * .74f))
+        }
     }
     face(x, hy, r * .78f, p, f)
-    burst(x, y, r * 1.3f, t, k)
+    burst(p, f, x, y, r * 1.3f)
 }
 
 private fun DrawScope.drawEmber(p: Pose, f: Tone) {
     val w = size.width; val h = size.height; val t = p.t; val k = p.k
     val r = w * .13f * p.grow
-    val x = w / 2 + sin(t * .7f) * w * .05f + p.dx
-    val y = h * .52f + sin(t * 1.4f) * h * .02f - k * h * .05f + p.dy
-    shadow(x, h * .86f, r, (h * .86f - y) / h, f.c)
-    glow(x, y - r * .3f, r * 3.4f, f.c, .5f + k * .4f)
+    val x = p.q(w / 2 + sin(t * .7f) * w * .05f + p.dx)
+    val y = p.q(h * .52f + sin(t * 1.4f) * h * .02f - k * h * .05f + p.dy)
+    shadow(p, x, h * .86f, r, (h * .86f - y) / h, f.c)
+    halo(p, x, y - r * .3f, r * 3.4f, f.c, .5f + k * .4f)
     val lean = sin(t * 1.9f) * .25f
     val fl = 1f + sin(t * 11f) * .04f + sin(t * 17f) * .03f + k * .25f
     fun tip(s: Float): Path = Path().apply {
@@ -422,55 +625,58 @@ private fun DrawScope.drawEmber(p: Pose, f: Tone) {
         close()
     }
     val outer = tip(1.05f)
-    drawPath(outer, f.c)
-    sheen(outer, f, x, y - r * .8f, r * 1.3f, t)
+    if (p.flat) flatFill(outer, p, f, f.c)
+    else { drawPath(outer, f.c); sheen(outer, f, x, y - r * .8f, r * 1.3f, t) }
     drawPath(tip(.85f), f.light)
     drawPath(tip(.55f), Color.White)
     face(x, y - r * .15f, r * .8f, p, f)
-    burst(x, y - r * .4f, r, t, k)
+    burst(p, f, x, y - r * .4f, r)
 }
 
 private fun DrawScope.drawBubble(p: Pose, f: Tone) {
     val w = size.width; val h = size.height; val t = p.t; val k = p.k
     val r = w * .24f * p.grow
-    val x = w / 2 + sin(t * .6f) * w * .04f + p.dx
-    val y = h * .45f + sin(t * 1.2f) * h * .03f - k * h * .05f + p.dy
-    shadow(x, h * .86f, r * .6f, (h * .86f - y) / h, f.c)
+    val x = p.q(w / 2 + sin(t * .6f) * w * .04f + p.dx)
+    val y = p.q(h * .45f + sin(t * 1.2f) * h * .03f - k * h * .05f + p.dy)
+    shadow(p, x, h * .86f, r * .6f, (h * .86f - y) / h, f.c)
     val wob = 1f + sin(t * 3f) * .02f + k * sin(t * 20f) * .05f
     translate(x, y) {
         scale(wob, 2f - wob, pivot = Offset.Zero) {
             val ball = circlePath(0f, 0f, r)
-            drawPath(ball, Brush.linearGradient(listOf(f.light.copy(alpha = .3f), f.c.copy(alpha = .1f), f.c.copy(alpha = .28f)), Offset(-r, -r), Offset(r, r)))
-            sheen(ball, f, 0f, 0f, r, t)
-            drawCircle(Color.White.copy(alpha = .55f), r, Offset.Zero, style = Stroke(r * .025f))
+            if (p.flat) {
+                drawPath(ball, f.light.copy(alpha = .5f))
+                if (p.ink) drawPath(ball, f.dark, style = Stroke(ink() * .5f))
+            } else {
+                drawPath(ball, Brush.linearGradient(listOf(f.light.copy(alpha = .3f), f.c.copy(alpha = .1f), f.c.copy(alpha = .28f)), Offset(-r, -r), Offset(r, r)))
+                sheen(ball, f, 0f, 0f, r, t)
+                drawCircle(Color.White.copy(alpha = .55f), r, Offset.Zero, style = Stroke(r * .025f))
+            }
             rotate(-.7f * DEG, pivot = Offset(-r * .45f, -r * .5f)) {
                 val e = ovalRect(-r * .45f, -r * .5f, r * .18f, r * .08f)
-                drawOval(Color.White.copy(alpha = .7f), e.topLeft, e.size)
+                drawOval(Color.White.copy(alpha = if (p.flat) 1f else .7f), e.topLeft, e.size)
             }
         }
     }
     val ir = r * .38f
-    val iy = y + r * .18f + sin(t * 2f) * r * .04f
-    glow(x, iy, ir * 2.2f, f.c, .45f + k * .3f)
-    val inner = circlePath(x, iy, ir)
-    drawPath(inner, bodyGrad(f, x, iy, ir))
-    sheen(inner, f, x, iy, ir, t)
+    val iy = p.q(y + r * .18f + sin(t * 2f) * r * .04f)
+    halo(p, x, iy, ir * 2.2f, f.c, .45f + k * .3f)
+    fill(circlePath(x, iy, ir), p, f, x, iy, ir)
     face(x, iy, ir, p, f)
-    burst(x, y, r * .8f, t, k)
+    burst(p, f, x, y, r * .8f)
 }
 
 private fun DrawScope.drawPuff(p: Pose, f: Tone) {
     val w = size.width; val h = size.height; val t = p.t; val k = p.k
     val r = w * .12f * p.grow
-    val x = w / 2 + sin(t * .5f) * w * .06f + p.dx
-    val y = h * .42f + sin(t) * h * .02f + p.dy
+    val x = p.q(w / 2 + sin(t * .5f) * w * .06f + p.dx)
+    val y = p.q(h * .42f + sin(t) * h * .02f + p.dy)
     if (k > 0f) {
         listOf(Color(0xFFFF8A8A), Color(0xFFFFD27A), Color(0xFF9BE07A), Color(0xFF7AC0FF)).forEachIndexed { i, col ->
             val rr = r * (2.6f - i * .16f); val cy = y + r * 1.4f
             drawArc(col.copy(alpha = (k * .8f).coerceIn(0f, 1f)), 189f, 162f, false, Offset(x - rr, cy - rr), Size(rr * 2, rr * 2), style = Stroke(r * .12f))
         }
     }
-    glow(x, y, r * 3.2f, f.c, .35f + k * .3f)
+    halo(p, x, y, r * 3.2f, f.c, .35f + k * .3f)
     if (p.who == Companion.DIM || p.who == Companion.BLAZE) for (i in 0 until 5) {
         val dy = ((t * 60f + i * 37f) % 80f) / 80f
         drawRect(f.c.copy(alpha = (.7f * (1 - dy)).coerceIn(0f, 1f)), Offset(x - r * .9f + i * r * .45f, y + r * .7f + dy * h * .25f), Size(r * .06f, r * .18f))
@@ -479,10 +685,16 @@ private fun DrawScope.drawPuff(p: Pose, f: Tone) {
     val cloud = Path().apply {
         for (pf in puffs) addOval(Rect(Offset(x + pf[0] * r + sin(t * 2 + pf[0]) * r * .03f, y + pf[1] * r), pf[2] * r))
     }
-    drawPath(cloud, Brush.radialGradient(0f to Color.White, .45f to f.light, 1f to f.c, center = Offset(x - r * .6f, y - r * .8f), radius = r * 2.4f))
-    sheen(cloud, f, x, y, r * 1.6f, t)
+    if (p.flat) {
+        // outline under the whole union, so only the cloud's edge is inked
+        flatFill(cloud, p, f, f.c)
+        spot(cloud, x - r * .2f, y - r * .1f, r * 1.1f, f.light)
+    } else {
+        drawPath(cloud, Brush.radialGradient(0f to Color.White, .45f to f.light, 1f to f.c, center = Offset(x - r * .6f, y - r * .8f), radius = r * 2.4f))
+        sheen(cloud, f, x, y, r * 1.6f, t)
+    }
     val base = ovalRect(x, y + r * .75f, r * 1.6f, r * .2f)
     drawOval(f.dark.copy(alpha = .25f), base.topLeft, base.size)
     face(x, y + r * .05f, r * .85f, p, f)
-    burst(x, y, r * 1.2f, t, k)
+    burst(p, f, x, y, r * 1.2f)
 }

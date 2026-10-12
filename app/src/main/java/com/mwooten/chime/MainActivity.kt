@@ -306,6 +306,7 @@ fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, co
                 say("Moved to tomorrow.")
             },
             onDelete = { QuestStore.delete(ctx, sq.id); say("Quest deleted.") },
+            onTalk = { said -> screen = "world"; talk(said, sq.id) },
         )
     }
 }

@@ -20,6 +20,7 @@ enum class ArtStyle { SHINY, FLAT, PIXEL }
  * The user's character (their chosen look, color and personality) in a given [style].
  * [glow] = false drops the halo and floor shadow (for small avatars in lists).
  * [pixels] sets the PIXEL grid width (e.g. 24 = very chunky, 40 = finer).
+ * Taps go to [onTap]; it is never draggable here (modes place it).
  */
 @Composable
 fun CharacterArt(
@@ -34,6 +35,9 @@ fun CharacterArt(
     onTap: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
-    // stub until the FLAT and PIXEL renderers land; every style draws the shiny character for now
-    Character(Settings.look(ctx), Settings.finish(ctx), who ?: Settings.companion(ctx), level, listening, size, draggable = false, onTap = onTap)
+    CharacterView(
+        look = Settings.look(ctx), finish = Settings.finish(ctx), who = who ?: Settings.companion(ctx),
+        level = level, listening = listening, size = size, draggable = false, modifier = modifier,
+        style = style, showGlow = glow, pixels = pixels, onTap = onTap,
+    )
 }

@@ -100,6 +100,8 @@ private fun Modifier.minesSunken(w: Int = 2): Modifier = drawBehind {
 fun MinesWorld(s: WorldState, a: WorldActions) {
     val f = s.focus
     var spilling by remember { mutableStateOf(false) }
+    // the face button is your character: tap it to talk, and what you say becomes a new mine
+    val voice = rememberVoice { heard -> a.spill(heard) }
 
     val due = f?.due
     val allDay = f?.allDay == true
@@ -134,8 +136,9 @@ fun MinesWorld(s: WorldState, a: WorldActions) {
                         }
                     }
                     Row(Modifier.padding(horizontal = 6.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        MinesMenu("G", "ame", ui) { a.openOptions() }
-                        MinesMenu("H", "elp", ui) { a.openOptions() }
+                        MinesMenu("G", "ame", ui) { spilling = !spilling }
+                        MinesMenu("V", "iew", ui) { a.openLog() }
+                        MinesMenu("S", "ettings", ui) { a.openOptions() }
                     }
                     Box(Modifier.weight(1f, fill = false).padding(6.dp).minesSunken().padding(8.dp)) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -148,12 +151,21 @@ fun MinesWorld(s: WorldState, a: WorldActions) {
                                 Text(s.today.size.coerceIn(0, 999).toString().padStart(3, '0'), style = digits, modifier = Modifier.background(Color.Black).padding(horizontal = 4.dp, vertical = 3.dp))
                                 Box(
                                     Modifier.size(44.dp).drawBehind {
-                                        drawRect(MinesFace)
-                                        minesEdge(Color.White, MinesShade, 0f, 2.dp.toPx())
-                                    }.tap { spilling = !spilling },
+                                        drawRect(if (voice.listening) MinesLight else MinesFace)
+                                        if (voice.listening) minesEdge(MinesShade, Color.White, 0f, 2.dp.toPx())
+                                        else minesEdge(Color.White, MinesShade, 0f, 2.dp.toPx())
+                                    },
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Canvas(Modifier.size(30.dp)) { minesFace(s.companion.c, s.companion.cDark, s.overdueCount > 0) }
+                                    CharacterArt(
+                                        size = 34.dp,
+                                        style = ArtStyle.PIXEL,
+                                        level = voice.level,
+                                        listening = voice.listening,
+                                        glow = false,
+                                        pixels = 16,
+                                        onTap = { voice.toggle() },
+                                    )
                                 }
                                 Text(mins.toString().padStart(3, '0'), style = digits, modifier = Modifier.background(Color.Black).padding(horizontal = 4.dp, vertical = 3.dp))
                             }
@@ -192,7 +204,13 @@ fun MinesWorld(s: WorldState, a: WorldActions) {
                 Text(
                     buildAnnotatedString {
                         withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("${s.companion.title}: ") }
-                        append(s.line)
+                        when {
+                            voice.listening -> {
+                                withStyle(SpanStyle(color = Color(0xFF000080))) { append(voice.heard.ifBlank { "Listening... say a new quest." }) }
+                            }
+                            voice.note.isNotBlank() -> append(voice.note)
+                            else -> append(s.line)
+                        }
                     },
                     style = ui, fontSize = 14.sp, lineHeight = 19.sp, maxLines = 5, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
@@ -320,20 +338,5 @@ private fun MinesButton(label: String, focused: Boolean, modifier: Modifier, onC
             label, fontFamily = FontFamily.SansSerif, fontSize = 13.sp, color = Color.Black,
             fontWeight = if (focused) FontWeight.Bold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
-    }
-}
-
-/** The companion's pixel face for the "new game" button, 15×15 grid. Frowns when something is overdue. */
-private fun DrawScope.minesFace(c: Color, dark: Color, worried: Boolean) {
-    val u = size.width / 15f
-    fun r(x: Int, y: Int, w: Int, h: Int, col: Color) = drawRect(col, Offset(x * u, y * u), Size(w * u, h * u))
-    r(3, 1, 9, 13, c); r(1, 3, 13, 9, c); r(2, 2, 11, 11, c)
-    r(4, 5, 2, 1, Color.Black); r(9, 5, 2, 1, Color.Black)
-    r(4, 4, 2, 1, dark)
-    if (worried) {
-        r(9, 4, 2, 1, dark)
-        r(5, 9, 5, 1, Color.Black); r(4, 10, 1, 1, Color.Black); r(10, 10, 1, 1, Color.Black)
-    } else {
-        r(5, 9, 5, 1, Color.Black); r(10, 8, 1, 1, Color.Black)
     }
 }

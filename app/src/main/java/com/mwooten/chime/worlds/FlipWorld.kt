@@ -88,6 +88,7 @@ fun FlipWorld(s: WorldState, a: WorldActions) {
     val i = if (msgs.isEmpty()) 0 else index.mod(msgs.size)
     val q: Quest? = msgs.getOrNull(i)
     val sms = flipTxt(q?.let { s.companion.line(it, s.now) } ?: s.line)
+    val voice = rememberVoice { heard -> a.spill(heard) }
 
     Box(
         Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF2C3442), Color(0xFF1B2029)))),
@@ -118,7 +119,7 @@ fun FlipWorld(s: WorldState, a: WorldActions) {
                     Modifier.weight(1f).fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp)).background(Color(0xFF0D1016)).padding(12.dp),
                 ) {
-                    FlipScreen(s, a, q, i, msgs.size, sms)
+                    FlipScreen(s, a, q, i, msgs.size, sms, voice)
                 }
             }
 
@@ -181,7 +182,7 @@ fun FlipWorld(s: WorldState, a: WorldActions) {
 
                 // the number keys
                 val keys = listOf(
-                    "1" to "LOG", "2" to "ABC", "3" to "DEF",
+                    "1" to "LOG", "2" to "TALK", "3" to "DEF",
                     "4" to "GHI", "5" to "JKL", "6" to "MNO",
                     "7" to "PQRS", "8" to "TUV", "9" to "WXYZ",
                 )
@@ -192,6 +193,7 @@ fun FlipWorld(s: WorldState, a: WorldActions) {
                             FlipNumKey(d, letters, Modifier.weight(1f)) {
                                 when (d) {
                                     "1" -> { a.openLog() }
+                                    "2" -> { voice.toggle() }
                                     "4" -> { if (msgs.size > 1) index = i - 1 }
                                     "6" -> { if (msgs.size > 1) index = i + 1 }
                                     "5" -> { if (q != null) a.openQuest(q) }
@@ -208,7 +210,7 @@ fun FlipWorld(s: WorldState, a: WorldActions) {
 }
 
 @Composable
-private fun FlipScreen(s: WorldState, a: WorldActions, q: Quest?, i: Int, count: Int, sms: String) {
+private fun FlipScreen(s: WorldState, a: WorldActions, q: Quest?, i: Int, count: Int, sms: String, voice: Voice) {
     Column(
         Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFFCFE6FF), Color(0xFFA8C8F0)))),
     ) {
@@ -239,10 +241,22 @@ private fun FlipScreen(s: WorldState, a: WorldActions, q: Quest?, i: Int, count:
         }
         // header
         Row(
-            Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 8.dp, vertical = 6.dp),
+            Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            // contact picture: your character as a tiny phone-screen sprite. Tap to talk.
+            Box(
+                Modifier.size(34.dp).border(1.dp, FlipNavy).background(Color(0xFFDDEBFA)),
+                contentAlignment = Alignment.Center,
+            ) {
+                CharacterArt(
+                    30.dp, ArtStyle.PIXEL, who = s.companion, level = voice.level, listening = voice.listening,
+                    glow = false, pixels = 22, onTap = { voice.toggle() },
+                )
+            }
+            Spacer(Modifier.width(6.dp))
             Text(
-                "From: ${s.companion.title}",
+                if (voice.listening) "Talk now..." else "From: ${s.companion.title}",
                 style = TextStyle(fontFamily = Fonts.pixelifySans, fontSize = 13.sp, color = FlipInk),
                 modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
@@ -259,10 +273,18 @@ private fun FlipScreen(s: WorldState, a: WorldActions, q: Quest?, i: Int, count:
                 .verticalScroll(rememberScrollState())
                 .padding(8.dp),
         ) {
-            Text(sms, style = TextStyle(fontFamily = Fonts.pixelifySans, fontSize = 15.sp, lineHeight = 20.sp, color = FlipInk))
+            val body = when {
+                voice.listening -> "New msg: " + voice.heard.ifBlank { "..." } + "_"
+                else -> sms
+            }
+            Text(body, style = TextStyle(fontFamily = Fonts.pixelifySans, fontSize = 15.sp, lineHeight = 20.sp, color = FlipInk))
         }
         Text(
-            "${sms.length}/160",
+            when {
+                voice.listening -> "tap pic to send"
+                voice.note.isNotBlank() -> voice.note
+                else -> "${sms.length}/160"
+            },
             style = TextStyle(fontFamily = Fonts.pixelifySans, fontSize = 11.sp, color = Color(0xFF5A6A80), textAlign = TextAlign.End),
             modifier = Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 8.dp, vertical = 4.dp),
         )
@@ -275,7 +297,7 @@ private fun FlipScreen(s: WorldState, a: WorldActions, q: Quest?, i: Int, count:
             Box(Modifier.weight(1f)) {
                 if (q != null) Text("Done", style = st, modifier = Modifier.tap { a.done(q) })
             }
-            Text("Menu", style = st, modifier = Modifier.tap(a::openOptions))
+            Text("Settings", style = st, modifier = Modifier.tap(a::openOptions))
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                 if (q != null) Text("Later", style = st, modifier = Modifier.tap { a.snooze(q, 60) })
                 else Text("Log", style = st, modifier = Modifier.tap(a::openLog))

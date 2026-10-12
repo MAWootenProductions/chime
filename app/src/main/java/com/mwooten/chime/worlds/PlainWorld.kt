@@ -1,6 +1,5 @@
 package com.mwooten.chime.worlds
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -26,11 +25,6 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -46,7 +40,6 @@ import com.mwooten.chime.data.Shelf
 import com.mwooten.chime.data.Time
 import com.mwooten.chime.data.shelf
 import com.mwooten.chime.ui.Fonts
-import com.mwooten.chime.ui.rememberClock
 import com.mwooten.chime.ui.tap
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -68,6 +61,7 @@ fun PlainWorld(s: WorldState, a: WorldActions) {
     val nowLdt = Time.ldt(s.now)
     val dayName = DateTimeFormatter.ofPattern("EEEE", Locale.getDefault()).format(today)
     val slots = plainSlots(s)
+    val voice = rememberVoice { heard -> a.spill(heard) }
 
     Column(
         Modifier
@@ -115,7 +109,14 @@ fun PlainWorld(s: WorldState, a: WorldActions) {
         // the companion, perched on the margin
         Row(Modifier.fillMaxWidth().padding(top = 18.dp), verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
-                val said = if (s.line.startsWith("“")) s.line else "“${s.line}”"
+                val heard = voice.heard
+                val line = when {
+                    voice.listening && heard.isNotBlank() -> heard + "…"
+                    voice.listening -> "Listening…"
+                    voice.note.isNotBlank() -> voice.note
+                    else -> s.line
+                }
+                val said = if (line.startsWith("“")) line else "“$line”"
                 Text(
                     said,
                     fontFamily = Fonts.newsreader, fontStyle = FontStyle.Italic, fontSize = 18.sp,
@@ -144,7 +145,18 @@ fun PlainWorld(s: WorldState, a: WorldActions) {
                 }
             }
             Spacer(Modifier.width(14.dp))
-            PlainBird(s, Modifier.padding(top = 2.dp).size(width = 60.dp, height = 48.dp))
+            // your character, drawn into the margin like a doodle. Tap it to talk.
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CharacterArt(
+                    size = 60.dp, style = ArtStyle.FLAT, level = voice.level, listening = voice.listening,
+                    glow = false, onTap = { voice.toggle() },
+                )
+                Text(
+                    if (voice.listening) "listening" else "tap to talk",
+                    fontFamily = Fonts.newsreader, fontStyle = FontStyle.Italic, fontSize = 11.sp, color = PlainHour,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
 
         // spill: just a line to write on
@@ -288,53 +300,4 @@ private fun plainSlots(s: WorldState): List<PlainSlot> {
     }
     out += PlainSlot("all day", allDay, null)
     return out
-}
-
-/** perch: still most of the time, then a quick bob and settle (6s loop). */
-private fun plainPerch(t: Float): Float = when {
-    t < 0.86f -> 0f
-    t < 0.90f -> -8f * ((t - 0.86f) / 0.04f)
-    t < 0.94f -> -8f + 12f * ((t - 0.90f) / 0.04f)
-    else -> 4f - 4f * ((t - 0.94f) / 0.06f)
-}
-
-@Composable
-private fun PlainBird(s: WorldState, modifier: Modifier) {
-    val clock = rememberClock()
-    val body = s.companion.c
-    val shade = s.companion.cDark
-    val light = s.companion.cLight
-    val legs = Color(0xFF5A3E24)
-    Canvas(
-        modifier.graphicsLayer {
-            rotationZ = plainPerch((clock.value % 6f) / 6f)
-            transformOrigin = TransformOrigin(0.3f, 0.9f)
-        }
-    ) {
-        val k = size.width / 60f
-        fun o(x: Float, y: Float) = Offset(x * k, y * k)
-        val bodyPath = Path().apply {
-            moveTo(8 * k, 30 * k)
-            cubicTo(8 * k, 18 * k, 22 * k, 12 * k, 34 * k, 16 * k)
-            cubicTo(42 * k, 18 * k, 46 * k, 26 * k, 44 * k, 34 * k)
-            cubicTo(36 * k, 40 * k, 18 * k, 40 * k, 8 * k, 30 * k)
-            close()
-        }
-        val tail = Path().apply { moveTo(40 * k, 22 * k); lineTo(56 * k, 4 * k); lineTo(50 * k, 22 * k); close() }
-        val wing = Path().apply { moveTo(12 * k, 30 * k); cubicTo(18 * k, 34 * k, 30 * k, 34 * k, 38 * k, 30 * k) }
-        val beak = Path().apply { moveTo(6 * k, 18 * k); lineTo(0f, 20 * k); lineTo(6 * k, 21 * k); close() }
-        drawLine(legs, o(20f, 38f), o(20f, 46f), 1.5f * k)
-        drawLine(legs, o(28f, 38f), o(28f, 46f), 1.5f * k)
-        drawPath(tail, shade)
-        drawPath(bodyPath, body)
-        drawPath(wing, shade, style = Stroke(width = 1.5f * k, cap = StrokeCap.Round))
-        drawLine(light, o(16f, 24f), o(20f, 24f), 1.5f * k)
-        drawLine(light, o(22f, 22f), o(26f, 22f), 1.5f * k)
-        drawLine(light, o(28f, 22f), o(32f, 22f), 1.5f * k)
-        drawCircle(body, 7 * k, o(12f, 20f))
-        drawPath(beak, Color(0xFF3A2A1A))
-        drawCircle(Color(0xFF111111), 1.4f * k, o(10f, 19f))
-        drawLine(light, o(9f, 16f), o(17f, 15f), 1.4f * k)
-        drawLine(PlainRule, o(0f, 47f), o(60f, 47f), 2f * k)
-    }
 }

@@ -71,7 +71,7 @@ fun AssistantWorld(s: WorldState, a: WorldActions) {
     val items = s.open
     var index by rememberSaveable { mutableStateOf(0) }
     var adding by rememberSaveable { mutableStateOf(false) }
-    var muted by rememberSaveable { mutableStateOf(false) }
+    val voice = rememberVoice { heard -> a.spill(heard) }
     val i = if (items.isEmpty()) 0 else index.mod(items.size)
     val q: Quest? = items.getOrNull(i)
     val line = q?.let { s.companion.line(it, s.now) } ?: s.line
@@ -82,7 +82,7 @@ fun AssistantWorld(s: WorldState, a: WorldActions) {
     val part = when (hour) { in 4..11 -> "morning"; in 12..16 -> "afternoon"; else -> "evening" }
     val withDeadline = s.today.size
     val intro = if (items.isEmpty()) "Good $part. Your list is clear."
-    else "Good $part. ${asCount(items.size)} ${if (items.size == 1) "thing" else "things"} on the list, " +
+    else "Good $part. ${asCount(items.size)} ${if (items.size == 1) "thing" else "things"} on your list, " +
         (if (withDeadline == 0) "none due today." else "${asCount(withDeadline).lowercase()} due today.")
 
     Box(
@@ -100,32 +100,48 @@ fun AssistantWorld(s: WorldState, a: WorldActions) {
             Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(horizontal = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // header: briefing title, who's on the line, call timer, options
-            Box(Modifier.fillMaxWidth().padding(top = 20.dp)) {
-                Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 44.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        "${part.uppercase()} BRIEFING",
-                        style = TextStyle(fontFamily = Fonts.manrope, fontWeight = FontWeight.W500, fontSize = 13.sp, letterSpacing = 1.sp, color = AsMuted),
-                    )
-                    Text(s.companion.title, style = TextStyle(fontFamily = Fonts.libreCaslonText, fontSize = 30.sp, color = AsInk))
-                    val mm = (callSecs / 60).toString().padStart(2, '0')
-                    val ss = (callSecs % 60).toString().padStart(2, '0')
-                    Text("$mm:$ss", style = TextStyle(fontFamily = Fonts.manrope, fontWeight = FontWeight.W500, fontSize = 14.sp, color = AsMuted))
-                }
-                AsRoundIcon(Modifier.align(Alignment.TopEnd), size = 40, onClick = a::openOptions) { col ->
-                    // three dots: call options
-                    val r = 2.dp.toPx()
-                    for (k in -1..1) drawCircle(col, r, Offset(size.width / 2 + k * 6.dp.toPx(), size.height / 2))
-                }
+            // top bar: call status on the left, Settings where a call screen keeps its menu
+            Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF7BD88F)))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "On a call",
+                    style = TextStyle(fontFamily = Fonts.manrope, fontWeight = FontWeight.W500, fontSize = 13.sp, color = AsMuted),
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "Settings",
+                    style = TextStyle(fontFamily = Fonts.manrope, fontWeight = FontWeight.W700, fontSize = 14.sp, color = AsInk),
+                    modifier = Modifier.clip(RoundedCornerShape(50)).background(Color(0x1AEEF2EC))
+                        .border(1.dp, Color(0x29EEF2EC), RoundedCornerShape(50))
+                        .tap(a::openOptions).padding(horizontal = 14.dp, vertical = 8.dp),
+                )
             }
 
-            Spacer(Modifier.height(24.dp))
-            AsAvatar(s, clock, talking = !muted)
-            Spacer(Modifier.height(28.dp))
+            // who's on the line and the call timer
+            Column(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    "${part.uppercase()} BRIEFING",
+                    style = TextStyle(fontFamily = Fonts.manrope, fontWeight = FontWeight.W500, fontSize = 13.sp, letterSpacing = 1.sp, color = AsMuted),
+                )
+                Text(s.companion.title, style = TextStyle(fontFamily = Fonts.libreCaslonText, fontSize = 30.sp, color = AsInk))
+                val mm = (callSecs / 60).toString().padStart(2, '0')
+                val ss = (callSecs % 60).toString().padStart(2, '0')
+                Text("$mm:$ss", style = TextStyle(fontFamily = Fonts.manrope, fontWeight = FontWeight.W500, fontSize = 14.sp, color = AsMuted))
+            }
+
+            Spacer(Modifier.height(18.dp))
+            AsAvatar(s, voice)
+            Text(
+                if (voice.listening) "Listening… tap again when you're done" else "Tap ${s.companion.title} to talk",
+                style = TextStyle(fontFamily = Fonts.manrope, fontWeight = FontWeight.W500, fontSize = 12.sp, color = AsMuted),
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            Spacer(Modifier.height(18.dp))
 
             // live captions
             Column(
@@ -137,45 +153,60 @@ fun AssistantWorld(s: WorldState, a: WorldActions) {
                         val t = clock.value
                         val bw = 3.dp.toPx()
                         for (k in 0..2) {
-                            val ph = if (muted) 0f else ((sin((t / 0.5f) * 2 * PI.toFloat() - k * 0.3f * 2 * PI.toFloat()) + 1f) / 2f)
-                            val h = (6f + 12f * ph).dp.toPx()
+                            val wave = (sin((t / 0.5f) * 2 * PI.toFloat() - k * 0.3f * 2 * PI.toFloat()) + 1f) / 2f
+                            val ph = if (voice.listening) (0.2f + voice.level) * wave else wave
+                            val h = (6f + 12f * ph.coerceIn(0f, 1f)).dp.toPx()
                             drawRect(Color(0xFFB9D8A8), topLeft = Offset(k * (bw + 2.dp.toPx()), (size.height - h) / 2), size = Size(bw, h))
                         }
                     }
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        if (muted) "Captions paused · you're on mute"
-                        else if (q == null) "Live captions · nothing on the list"
+                        if (voice.listening) "Live captions · you're talking"
+                        else if (q == null) "Live captions · nothing on your list"
                         else "Live captions · item ${i + 1} of ${items.size}",
                         style = TextStyle(fontFamily = Fonts.manrope, fontWeight = FontWeight.W500, fontSize = 12.sp, color = AsMuted),
                     )
                 }
-                Text(
-                    if (i == 0 || q == null) intro else "Next up, item ${i + 1}.",
-                    style = TextStyle(fontFamily = Fonts.libreCaslonText, fontSize = 22.sp, lineHeight = 30.sp, color = AsPrev),
-                )
-                Text(
-                    line,
-                    style = TextStyle(fontFamily = Fonts.libreCaslonText, fontSize = 25.sp, lineHeight = 34.sp, color = AsInk),
-                    modifier = Modifier.tap { if (q != null) a.openQuest(q) },
-                )
+                if (voice.listening || voice.heard.isNotBlank() || voice.note.isNotBlank()) {
+                    // your side of the call
+                    val mine = when {
+                        voice.listening -> "You: " + voice.heard.ifBlank { "…" }
+                        voice.note.isNotBlank() -> voice.note
+                        else -> "You: “${voice.heard}” (added to your list)"
+                    }
+                    Text(
+                        mine,
+                        style = TextStyle(fontFamily = Fonts.manrope, fontWeight = FontWeight.W500, fontSize = 17.sp, lineHeight = 24.sp, color = Color(0xFFB9D8A8)),
+                    )
+                }
+                if (!voice.listening) {
+                    Text(
+                        if (i == 0 || q == null) intro else "Next up, item ${i + 1}.",
+                        style = TextStyle(fontFamily = Fonts.libreCaslonText, fontSize = 22.sp, lineHeight = 30.sp, color = AsPrev),
+                    )
+                    Text(
+                        line,
+                        style = TextStyle(fontFamily = Fonts.libreCaslonText, fontSize = 25.sp, lineHeight = 34.sp, color = AsInk),
+                        modifier = Modifier.tap { if (q != null) a.openQuest(q) },
+                    )
+                }
             }
 
             Spacer(Modifier.height(12.dp))
 
-            // what you can say back
+            // plain answers you can tap
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (q != null) {
-                    AsReply("“Yes, I'm on it.”", primary = true, modifier = Modifier.fillMaxWidth()) { a.done(q) }
+                    AsReply("Done ✓", primary = true, modifier = Modifier.fillMaxWidth()) { a.done(q) }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AsReply("“Remind me in an hour.”", primary = false, modifier = Modifier.weight(1f)) { a.snooze(q, 60) }
+                        AsReply("Later (1 hour)", primary = false, modifier = Modifier.weight(1f)) { a.snooze(q, 60) }
                         AsReply(
-                            if (items.size > 1) "“Next item.”" else "“Read me the log.”",
+                            if (items.size > 1) "Next item" else "Full list",
                             primary = false, modifier = Modifier.weight(1f),
                         ) { if (items.size > 1) { index = i + 1 } else { a.openLog() } }
                     }
                 } else if (!adding) {
-                    AsReply("“Add something.”", primary = true, modifier = Modifier.fillMaxWidth()) { adding = true }
+                    AsReply("Add a to-do", primary = true, modifier = Modifier.fillMaxWidth()) { adding = true }
                 }
                 if (adding) {
                     Row(
@@ -187,13 +218,13 @@ fun AssistantWorld(s: WorldState, a: WorldActions) {
                         SpillInput(
                             onSpill = { a.spill(it); adding = false },
                             textStyle = TextStyle(fontFamily = Fonts.manrope, fontWeight = FontWeight.W700, fontSize = 16.sp, color = AsInk),
-                            placeholder = "“Remind me to…”",
+                            placeholder = "Type a to-do, like “call mom at 5”",
                             placeholderColor = AsPrev,
                             cursor = Color(0xFFB9D8A8),
                             modifier = Modifier.weight(1f),
                             trailing = { submit ->
                                 Text(
-                                    "Say it",
+                                    "Add",
                                     style = TextStyle(fontFamily = Fonts.manrope, fontWeight = FontWeight.W700, fontSize = 14.sp, color = AsBg),
                                     modifier = Modifier.padding(start = 8.dp).clip(RoundedCornerShape(10.dp)).background(AsInk)
                                         .tap { submit() }.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -204,104 +235,81 @@ fun AssistantWorld(s: WorldState, a: WorldActions) {
                 }
             }
 
-            // call controls
+            // call controls, each with a plain label underneath
             Row(
-                Modifier.padding(top = 22.dp, bottom = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(22.dp),
+                Modifier.padding(top = 18.dp, bottom = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(26.dp),
             ) {
-                AsRoundIcon(Modifier, size = 58, bg = if (adding) Color(0x33EEF2EC) else Color(0x1AEEF2EC), onClick = { adding = !adding }) { col ->
-                    val w = 2.dp.toPx(); val c = size.width / 2; val h = 6.dp.toPx()
-                    drawLine(col, Offset(c, c - h), Offset(c, c + h), strokeWidth = w, cap = StrokeCap.Round)
-                    drawLine(col, Offset(c - h, c), Offset(c + h, c), strokeWidth = w, cap = StrokeCap.Round)
-                }
-                AsRoundIcon(Modifier, size = 58, bg = if (muted) AsInk else Color(0x1AEEF2EC), onClick = { muted = !muted }) { _ ->
-                    val col = if (muted) AsBg else AsInk
-                    val ox = size.width / 2 - 10.dp.toPx(); val oy = size.height / 2 - 10.dp.toPx()
-                    val sw = 1.8.dp.toPx()
-                    drawRoundRect(
-                        col, topLeft = Offset(ox + 7.dp.toPx(), oy + 2.dp.toPx()), size = Size(6.dp.toPx(), 10.dp.toPx()),
-                        cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()), style = Stroke(sw),
-                    )
-                    val p = Path().apply {
-                        moveTo(ox + 4.dp.toPx(), oy + 10.dp.toPx())
-                        cubicTo(ox + 4.dp.toPx(), oy + 18.dp.toPx(), ox + 16.dp.toPx(), oy + 18.dp.toPx(), ox + 16.dp.toPx(), oy + 10.dp.toPx())
-                        moveTo(ox + 10.dp.toPx(), oy + 16.dp.toPx())
-                        lineTo(ox + 10.dp.toPx(), oy + 19.dp.toPx())
+                AsControl("Type") {
+                    AsRoundIcon(Modifier, size = 58, bg = if (adding) Color(0x33EEF2EC) else Color(0x1AEEF2EC), onClick = { adding = !adding }) { col ->
+                        val w = 2.dp.toPx(); val c = size.width / 2; val h = 6.dp.toPx()
+                        drawLine(col, Offset(c, c - h), Offset(c, c + h), strokeWidth = w, cap = StrokeCap.Round)
+                        drawLine(col, Offset(c - h, c), Offset(c + h, c), strokeWidth = w, cap = StrokeCap.Round)
                     }
-                    drawPath(p, col, style = Stroke(sw))
-                    if (muted) drawLine(col, Offset(ox + 2.dp.toPx(), oy + 2.dp.toPx()), Offset(ox + 18.dp.toPx(), oy + 18.dp.toPx()), strokeWidth = sw, cap = StrokeCap.Round)
                 }
-                // end the briefing: hang up and look at the whole log
-                AsRoundIcon(Modifier, size = 58, bg = Color(0xFFD4453A), onClick = a::openLog) { _ ->
-                    val sc = 24.dp.toPx() / 24f
-                    val ox = size.width / 2 - 12.dp.toPx(); val oy = size.height / 2 - 6.dp.toPx()
-                    fun X(x: Float) = ox + x * sc
-                    fun Y(y: Float) = oy + y * sc
-                    val p = Path().apply {
-                        moveTo(X(2f), Y(8f))
-                        cubicTo(X(8f), Y(2f), X(16f), Y(2f), X(22f), Y(8f))
-                        lineTo(X(19f), Y(11f)); lineTo(X(15f), Y(9f)); lineTo(X(15f), Y(6f))
-                        cubicTo(X(12f), Y(5f), X(12f), Y(5f), X(9f), Y(6f))
-                        lineTo(X(9f), Y(9f)); lineTo(X(5f), Y(11f)); close()
+                AsControl(if (voice.listening) "Stop" else "Talk") {
+                    AsRoundIcon(Modifier, size = 58, bg = if (voice.listening) AsInk else Color(0x1AEEF2EC), onClick = { voice.toggle() }) { _ ->
+                        val col = if (voice.listening) AsBg else AsInk
+                        val ox = size.width / 2 - 10.dp.toPx(); val oy = size.height / 2 - 10.dp.toPx()
+                        val sw = 1.8.dp.toPx()
+                        drawRoundRect(
+                            col, topLeft = Offset(ox + 7.dp.toPx(), oy + 2.dp.toPx()), size = Size(6.dp.toPx(), 10.dp.toPx()),
+                            cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()), style = Stroke(sw),
+                        )
+                        val p = Path().apply {
+                            moveTo(ox + 4.dp.toPx(), oy + 10.dp.toPx())
+                            cubicTo(ox + 4.dp.toPx(), oy + 18.dp.toPx(), ox + 16.dp.toPx(), oy + 18.dp.toPx(), ox + 16.dp.toPx(), oy + 10.dp.toPx())
+                            moveTo(ox + 10.dp.toPx(), oy + 16.dp.toPx())
+                            lineTo(ox + 10.dp.toPx(), oy + 19.dp.toPx())
+                        }
+                        drawPath(p, col, style = Stroke(sw))
                     }
-                    drawPath(p, Color.White)
+                }
+                // end the briefing: hang up and look at the whole list
+                AsControl("Full list") {
+                    AsRoundIcon(Modifier, size = 58, bg = Color(0xFFD4453A), onClick = a::openLog) { _ ->
+                        val sc = 24.dp.toPx() / 24f
+                        val ox = size.width / 2 - 12.dp.toPx(); val oy = size.height / 2 - 6.dp.toPx()
+                        fun X(x: Float) = ox + x * sc
+                        fun Y(y: Float) = oy + y * sc
+                        val p = Path().apply {
+                            moveTo(X(2f), Y(8f))
+                            cubicTo(X(8f), Y(2f), X(16f), Y(2f), X(22f), Y(8f))
+                            lineTo(X(19f), Y(11f)); lineTo(X(15f), Y(9f)); lineTo(X(15f), Y(6f))
+                            cubicTo(X(12f), Y(5f), X(12f), Y(5f), X(9f), Y(6f))
+                            lineTo(X(9f), Y(9f)); lineTo(X(5f), Y(11f)); close()
+                        }
+                        drawPath(p, Color.White)
+                    }
                 }
             }
         }
     }
 }
 
-/** The companion as a bird in a headset, inside a round "on call" face. Tinted with its colors. */
+/** A round call button with a short plain-words label under it. */
 @Composable
-private fun AsAvatar(s: WorldState, clock: androidx.compose.runtime.State<Float>, talking: Boolean) {
-    val body = s.companion.c
-    val wing = s.companion.cDark
-    val beak = lerp(s.companion.cDark, Color.Black, 0.45f)
-    val brow = s.companion.cLight
+private fun AsControl(label: String, button: @Composable () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        button()
+        Text(label, style = TextStyle(fontFamily = Fonts.manrope, fontWeight = FontWeight.W500, fontSize = 12.sp, color = AsMuted))
+    }
+}
+
+/** The caller: the user's own character, glossy, inside soft "on call" rings. Tap to talk. */
+@Composable
+private fun AsAvatar(s: WorldState, voice: Voice) {
     Box(Modifier.size(152.dp), contentAlignment = Alignment.Center) {
         Canvas(Modifier.size(152.dp)) {
             val r = 62.dp.toPx()
-            drawCircle(AsFace.copy(alpha = 0.05f), r + 14.dp.toPx())
-            drawCircle(AsFace.copy(alpha = 0.12f), r + 6.dp.toPx())
+            val swell = if (voice.listening) voice.level * 8.dp.toPx() else 0f
+            drawCircle(AsFace.copy(alpha = 0.05f), r + 14.dp.toPx() + swell)
+            drawCircle(AsFace.copy(alpha = 0.12f), r + 6.dp.toPx() + swell * 0.5f)
         }
-        Canvas(
-            Modifier.size(124.dp)
-                .graphicsLayer {
-                    val t = clock.value
-                    val k = if (talking) 1f + 0.03f * (1f - kotlin.math.cos(t / 1.2f * 2f * PI.toFloat())) else 1f
-                    scaleX = k; scaleY = k
-                }
-                .clip(CircleShape),
-        ) {
-            val u = size.width / 124f
-            fun P(x: Float, y: Float) = Offset(x * u, y * u)
-            drawCircle(AsFace)
-            // body
-            drawPath(Path().apply {
-                moveTo(26 * u, 98 * u)
-                cubicTo(26 * u, 70 * u, 50 * u, 56 * u, 72 * u, 60 * u)
-                cubicTo(90 * u, 64 * u, 98 * u, 80 * u, 96 * u, 98 * u)
-                close()
-            }, body)
-            // tail
-            drawPath(Path().apply { moveTo(86 * u, 72 * u); lineTo(112 * u, 50 * u); lineTo(104 * u, 80 * u); close() }, wing)
-            // head
-            drawCircle(body, 22 * u, P(48f, 54f))
-            // beak
-            drawPath(Path().apply { moveTo(28 * u, 52 * u); lineTo(16 * u, 56 * u); lineTo(28 * u, 59 * u); close() }, beak)
-            // eye + brow
-            drawCircle(Color(0xFF111111), 3 * u, P(42f, 50f))
-            drawLine(brow, P(38f, 44f), P(60f, 42f), strokeWidth = 2.5f * u, cap = StrokeCap.Round)
-            // headset band, ear cup, mic boom
-            drawPath(Path().apply {
-                moveTo(30 * u, 40 * u); cubicTo(34 * u, 22 * u, 64 * u, 22 * u, 68 * u, 42 * u)
-            }, Color(0xFF2A2A2A), style = Stroke(4 * u))
-            drawRoundRect(Color(0xFF2A2A2A), topLeft = P(62f, 40f), size = Size(10 * u, 16 * u), cornerRadius = CornerRadius(4 * u, 4 * u))
-            drawPath(Path().apply {
-                moveTo(66 * u, 56 * u); cubicTo(64 * u, 68 * u, 52 * u, 72 * u, 40 * u, 68 * u)
-            }, Color(0xFF2A2A2A), style = Stroke(2.5f * u))
-            drawCircle(Color(0xFF2A2A2A), 3 * u, P(38f, 68f))
-        }
+        CharacterArt(
+            124.dp, ArtStyle.SHINY, who = s.companion, level = voice.level, listening = voice.listening,
+            glow = false, onTap = { voice.toggle() },
+        )
     }
 }
 

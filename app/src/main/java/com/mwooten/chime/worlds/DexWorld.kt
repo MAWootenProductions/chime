@@ -107,6 +107,7 @@ fun DexWorld(s: WorldState, a: WorldActions) {
     val prev = if (idx > 0) s.open[idx - 1] else null
     val next = if (idx >= 0) s.open.getOrNull(idx + 1) else null
     val clock = rememberClock()
+    val voice = rememberVoice { heard -> a.spill(heard) }
     val inf = rememberInfiniteTransition(label = "dex")
     val lensAlpha by inf.animateFloat(0.7f, 1f, infiniteRepeatable(tween(1000), RepeatMode.Reverse), label = "lens")
 
@@ -151,10 +152,11 @@ fun DexWorld(s: WorldState, a: WorldActions) {
                         .background(DexBone, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
+                    // the big lens shows your guide: your character as a pixel sprite. Tap it to talk.
                     Box(
                         Modifier
                             .size(48.dp)
-                            .alpha(lensAlpha)
+                            .clip(CircleShape)
                             .drawBehind {
                                 val c = Offset(size.width * 0.35f, size.height * 0.3f)
                                 drawCircle(
@@ -162,9 +164,16 @@ fun DexWorld(s: WorldState, a: WorldActions) {
                                         0f to Color(0xFFC8F4FF), 0.5f to Color(0xFF2AA0D8), 1f to Color(0xFF0A4A7A),
                                         center = c, radius = size.width * 0.85f,
                                     ),
+                                    alpha = if (voice.listening) 1f else lensAlpha,
                                 )
-                            }
-                    )
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CharacterArt(
+                            42.dp, ArtStyle.PIXEL, who = s.companion, level = voice.level, listening = voice.listening,
+                            glow = false, pixels = 20, onTap = { voice.toggle() },
+                        )
+                    }
                 }
                 Spacer(Modifier.width(12.dp))
                 Box(
@@ -179,7 +188,11 @@ fun DexWorld(s: WorldState, a: WorldActions) {
                 Box(Modifier.size(14.dp).background(Color(0xFF6AC46A), CircleShape))
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                    Text("FIELD GUIDE", color = Color(0xFFB8C4A0), fontSize = 12.sp, fontFamily = Fonts.chakraPetch, fontWeight = FontWeight.W500)
+                    Text(
+                        if (voice.listening) "LISTENING…" else "FIELD GUIDE · TAP LENS TO TALK",
+                        color = if (voice.listening) DexYellow else Color(0xFFB8C4A0), fontSize = 12.sp, fontFamily = Fonts.chakraPetch, fontWeight = FontWeight.W500,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                     Text(
                         "SEEN ${s.quests.size} · CAUGHT ${s.done.size}",
                         color = DexYellow, fontSize = 17.sp, fontFamily = Fonts.chakraPetch, fontWeight = FontWeight.W700,
@@ -275,7 +288,18 @@ fun DexWorld(s: WorldState, a: WorldActions) {
                                 .border(2.dp, DexInk)
                                 .padding(horizontal = 12.dp, vertical = 10.dp)
                         ) {
-                            if (scanning || q == null) {
+                            if (voice.listening || voice.note.isNotBlank() && q == null) {
+                                Text(
+                                    buildAnnotatedString {
+                                        withStyle(SpanStyle(fontWeight = FontWeight.W700, color = s.companion.cDark)) {
+                                            append(if (voice.listening) "Recording field notes… " else "${s.companion.title}: ")
+                                        }
+                                        append(if (voice.listening) voice.heard.ifBlank { "describe the new creature." } else voice.note)
+                                    },
+                                    color = DexInk, fontFamily = Fonts.chakraPetch, fontWeight = FontWeight.W500,
+                                    fontSize = 14.sp, lineHeight = 20.sp,
+                                )
+                            } else if (scanning || q == null) {
                                 Text(
                                     buildAnnotatedString {
                                         withStyle(SpanStyle(fontWeight = FontWeight.W700, color = s.companion.cDark)) {
@@ -296,7 +320,7 @@ fun DexWorld(s: WorldState, a: WorldActions) {
                                     modifier = Modifier.fillMaxWidth().background(Color(0xFFC4D4AC)).padding(horizontal = 8.dp, vertical = 8.dp),
                                     trailing = { submit ->
                                         Text(
-                                            "LOG IT", color = DexLcd, fontFamily = Fonts.silkscreen, fontSize = 11.sp,
+                                            "ADD", color = DexLcd, fontFamily = Fonts.silkscreen, fontSize = 11.sp,
                                             modifier = Modifier.background(DexInk).tap(submit).padding(horizontal = 8.dp, vertical = 4.dp),
                                         )
                                     },
@@ -344,7 +368,7 @@ fun DexWorld(s: WorldState, a: WorldActions) {
                 horizontalArrangement = Arrangement.spacedBy(28.dp, Alignment.CenterHorizontally),
             ) {
                 if (q != null) DexPill("LATER") { a.snooze(q, 60) }
-                DexPill("MENU") { a.openOptions() }
+                DexPill("SETTINGS") { a.openOptions() }
             }
 
             // controls
@@ -377,12 +401,12 @@ fun DexWorld(s: WorldState, a: WorldActions) {
                                 .padding(vertical = 14.dp),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text("CATCH (done)", color = DexInk, fontFamily = Fonts.chakraPetch, fontWeight = FontWeight.W700, fontSize = 16.sp)
+                            Text("CATCH · DONE ✓", color = DexInk, fontFamily = Fonts.chakraPetch, fontWeight = FontWeight.W700, fontSize = 16.sp)
                         }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        DexButton(if (scanning) "CANCEL" else "SCAN NEW", Modifier.weight(1f)) { scanning = !scanning }
-                        DexButton("TRACK", Modifier.weight(1f)) { a.openLog() }
+                        DexButton(if (scanning) "CANCEL" else "ADD NEW", Modifier.weight(1f)) { scanning = !scanning }
+                        DexButton("FULL LIST", Modifier.weight(1f)) { a.openLog() }
                     }
                 }
             }

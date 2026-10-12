@@ -8,12 +8,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -22,7 +26,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -35,6 +42,8 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -125,9 +134,12 @@ fun Desktop98World(s: WorldState, a: WorldActions) {
     val clock = rememberClock()
     val c = s.companion
     val okHolder = remember { arrayOfNulls<() -> Unit>(1) }
+    val voice = rememberVoice { heard -> a.spill(heard) }
+    var startOpen by remember { mutableStateOf(false) }
 
+    Box(Modifier.fillMaxSize().background(D98Desk)) {
     Column(
-        Modifier.fillMaxSize().background(D98Desk).statusBarsPadding().imePadding()
+        Modifier.fillMaxSize().statusBarsPadding().imePadding()
     ) {
         Column(
             Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
@@ -170,9 +182,9 @@ fun Desktop98World(s: WorldState, a: WorldActions) {
                             Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 12.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                         ) {
-                            D98Button("Respond", 84.dp, focused = true) { a.openQuest(q) }
-                            D98Button("Snooze", 84.dp) { a.snooze(q, 30) }
-                            D98Button("Done", 64.dp) { a.done(q) }
+                            D98Button("Done", 64.dp, focused = true) { a.done(q) }
+                            D98Button("Later", 64.dp) { a.snooze(q, 30) }
+                            D98Button("Open...", 72.dp) { a.openQuest(q) }
                         }
                     }
                 } else {
@@ -198,15 +210,15 @@ fun Desktop98World(s: WorldState, a: WorldActions) {
 
                 Spacer(Modifier.height(20.dp))
 
-                // Run box = spill
-                D98Window("Spill", active = false, onClose = null) {
+                // Run box = add a to-do
+                D98Window("New To-Do", active = false, onClose = null) {
                     Column(
                         Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text("Type what's on your mind, and Chime will file it.", style = D98Text)
+                        Text(voice.note.ifBlank { "Type a to-do and Chime will file it, or click ${c.title} to say it." }, style = D98Text)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Open:", style = D98Text)
+                            Text("To-do:", style = D98Text)
                             Box(Modifier.weight(1f).d98Sunken(Color.White, deep = true).padding(horizontal = 6.dp, vertical = 5.dp)) {
                                 SpillInput(
                                     onSpill = a::spill,
@@ -229,13 +241,18 @@ fun Desktop98World(s: WorldState, a: WorldActions) {
             }
         }
 
-        // the companion's tooltip balloon
-        if (q != null) {
+        // the assistant's tooltip balloon
+        val balloon: String? = when {
+            voice.listening -> "I'm listening... " + voice.heard
+            q != null -> s.line
+            else -> null
+        }
+        if (balloon != null) {
             Box(Modifier.fillMaxWidth().padding(start = 120.dp, end = 14.dp)) {
                 Text(
                     buildAnnotatedString {
                         withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("${c.title}: ") }
-                        append(s.line)
+                        append(balloon)
                     },
                     style = D98Text.copy(lineHeight = 16.sp),
                     maxLines = 5, overflow = TextOverflow.Ellipsis,
@@ -248,22 +265,32 @@ fun Desktop98World(s: WorldState, a: WorldActions) {
             }
         }
 
-        // the companion as a little desktop pet pacing above the taskbar
-        Canvas(Modifier.fillMaxWidth().height(28.dp)) {
-            val t = clock.value
-            val p = (t % 9f) / 9f
-            val travel = 150.dp.toPx()
-            val dx = when {
-                p < 0.48f -> travel * (p / 0.48f)
-                p < 0.5f -> travel
-                p < 0.98f -> travel * (1f - (p - 0.5f) / 0.48f)
-                else -> 0f
+        // your character as a little pixel desktop pet pacing above the taskbar. Click it to talk.
+        Box(Modifier.fillMaxWidth().height(44.dp)) {
+            Box(
+                Modifier
+                    .offset {
+                        val t = clock.value
+                        val p = (t % 9f) / 9f
+                        val travel = 150.dp.toPx()
+                        val dx = if (voice.listening) 0f else when {
+                            p < 0.48f -> travel * (p / 0.48f)
+                            p < 0.5f -> travel
+                            p < 0.98f -> travel * (1f - (p - 0.5f) / 0.48f)
+                            else -> 0f
+                        }
+                        IntOffset((110.dp.toPx() + dx).toInt(), 0)
+                    }
+                    .graphicsLayer {
+                        val p = (clock.value % 9f) / 9f
+                        scaleX = if (!voice.listening && p >= 0.5f && p < 0.98f) -1f else 1f
+                    },
+            ) {
+                CharacterArt(
+                    40.dp, ArtStyle.PIXEL, who = c, level = voice.level, listening = voice.listening,
+                    glow = false, pixels = 24, onTap = { voice.toggle() },
+                )
             }
-            val flip = p >= 0.5f && p < 0.98f
-            val u = 2.dp.toPx()
-            val startX = minOf(110.dp.toPx(), (size.width - travel - 16 * u).coerceAtLeast(0f))
-            val bob = if (((t / 0.15f).toInt() % 2) == 0) 0f else -2.dp.toPx()
-            d98Cat(startX + dx, size.height - 12 * u - 2.dp.toPx() + bob, u, flip, c.c, c.cDark)
         }
 
         // taskbar
@@ -280,7 +307,9 @@ fun Desktop98World(s: WorldState, a: WorldActions) {
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Row(
-                    Modifier.height(26.dp).d98Raised().tap(a::openOptions).padding(horizontal = 8.dp),
+                    Modifier.height(26.dp)
+                        .then(if (startOpen) Modifier.d98Sunken(D98Face, deep = true) else Modifier.d98Raised())
+                        .tap { startOpen = !startOpen }.padding(horizontal = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
@@ -299,7 +328,7 @@ fun Desktop98World(s: WorldState, a: WorldActions) {
                     contentAlignment = Alignment.CenterStart,
                 ) {
                     Text(
-                        if (q != null) d98Exe(q.text) else "Quest Log",
+                        if (q != null) d98Exe(q.text) else "To-Do List",
                         style = D98Text, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -311,6 +340,52 @@ fun Desktop98World(s: WorldState, a: WorldActions) {
                 }
             }
         }
+    }
+
+    // the Chime menu, rising out of the taskbar button
+    if (startOpen) {
+        Box(Modifier.fillMaxSize().tap { startOpen = false })
+        Row(
+            Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(start = 4.dp, bottom = 33.dp)
+                .width(220.dp).height(IntrinsicSize.Min).d98Raised().padding(3.dp),
+        ) {
+            // the tall banner down the left side
+            Box(
+                Modifier.width(24.dp).fillMaxHeight()
+                    .background(Brush.verticalGradient(listOf(Color(0xFF1084D0), Color(0xFF00087A)))),
+                contentAlignment = Alignment.Center,
+            ) {
+                // reads bottom-to-top, like the old start-menu banners
+                Text(
+                    "Chime 98",
+                    style = D98Text.copy(color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp),
+                    maxLines = 1, softWrap = false,
+                    modifier = Modifier.requiredWidth(90.dp).graphicsLayer { rotationZ = -90f },
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                D98MenuItem("Talk to ${c.title}") { startOpen = false; voice.toggle() }
+                D98MenuItem("To-Do List") { startOpen = false; a.openLog() }
+                if (q != null) D98MenuItem("Open ${d98Exe(q.text)}") { startOpen = false; a.openQuest(q) }
+                Box(Modifier.fillMaxWidth().padding(vertical = 2.dp, horizontal = 2.dp).height(2.dp).d98Sunken(D98Face, deep = false))
+                D98MenuItem("Settings", bold = true) { startOpen = false; a.openOptions() }
+            }
+        }
+    }
+    }
+}
+
+@Composable
+private fun D98MenuItem(label: String, bold: Boolean = false, onClick: () -> Unit) {
+    Box(
+        Modifier.fillMaxWidth().height(32.dp).tap(onClick).padding(horizontal = 10.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(
+            label,
+            style = D98Text.copy(fontSize = 13.sp, fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal),
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -454,18 +529,4 @@ private fun DrawScope.d98Info() {
     drawCircle(Color(0xFF0A2A8A), radius = 15f * s, style = Stroke(1.5f * s))
     drawRect(Color(0xFF0A2A8A), Offset(15.5f * s, 8f * s), Size(3f * s, 3f * s))
     drawRect(Color(0xFF0A2A8A), Offset(15.5f * s, 13f * s), Size(3f * s, 12f * s))
-}
-
-/** A 16x12 pixel cat, tinted with the companion's colors. */
-private fun DrawScope.d98Cat(x: Float, y: Float, u: Float, flip: Boolean, body: Color, dark: Color) {
-    fun px(cx: Int, cy: Int, w: Int, h: Int, color: Color, alpha: Float = 1f) {
-        val gx = if (flip) 16 - cx - w else cx
-        drawRect(color, Offset(x + gx * u, y + cy * u), Size(w * u, h * u), alpha = alpha)
-    }
-    px(2, 0, 1, 2, dark); px(5, 0, 1, 2, dark)
-    px(1, 2, 6, 4, body)
-    px(2, 3, 1, 1, Color.White); px(5, 3, 1, 1, Color.White)
-    px(2, 3, 1, 1, dark, 0.6f)
-    px(4, 6, 9, 4, body); px(13, 4, 1, 4, body); px(14, 3, 1, 2, body)
-    px(5, 10, 1, 2, dark); px(11, 10, 1, 2, dark)
 }

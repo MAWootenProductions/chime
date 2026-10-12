@@ -10,6 +10,12 @@ object Parser {
     data class Parsed(val title: String, val due: Long?, val allDay: Boolean, val kind: String)
 
     private val I = RegexOption.IGNORE_CASE
+    private val WORDS = mapOf("one" to 1, "two" to 2, "three" to 3, "four" to 4, "five" to 5, "six" to 6, "seven" to 7,
+        "eight" to 8, "nine" to 9, "ten" to 10, "eleven" to 11, "twelve" to 12)
+    /** How people start a request; none of it belongs in the task's name. */
+    private val LEAD = Regex("^(?:(?:hey|hi|ok|okay|so|um|uh)[,!]?\\s+)*(?:(?:wren|fizz|pip|dim|blaze|chime)[,!]?\\s+)?(?:please\\s+)?" +
+        "(?:(?:can|could|would|will) you\\s+(?:please\\s+)?)?(?:(?:please\\s+)?(?:remind me|set a reminder|add a reminder|make a reminder|add a task|add to my list|remember|don'?t (?:let me )?forget|make sure)\\s*(?:to|that i|that|i|about)?\\s+" +
+        "|(?:i (?:need|have|gotta|got|want|should|must|ought) (?:to\\s+)?)|(?:i'?ve got to\\s+)|(?:i'?ll need to\\s+))?(?:please\\s+)?", I)
     private val MONTHS = listOf("january", "february", "march", "april", "may", "june", "july",
         "august", "september", "october", "november", "december")
     private val DAYS = mapOf(
@@ -75,11 +81,15 @@ object Parser {
         fun deadline(word: String?) = word != null && Regex("before|by|until|till", I).containsMatchIn(word)
 
         // "in 2 hours", "in 30 min", "in 3 days"
-        take(Regex("\\bin\\s+(\\d+|an?|half an?)\\s*(minutes?|mins?|m|hours?|hrs?|h|days?|weeks?)\\b", I)) { m ->
+        take(Regex("\\bin\\s+(\\d+|an?|half an?|a couple(?: of)?|couple(?: of)?|a few|few|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\\s*(minutes?|mins?|m|hours?|hrs?|h|days?|weeks?)\\b", I)) { m ->
+            val w = m.groupValues[1].lowercase()
             val n = when {
-                m.groupValues[1].lowercase().startsWith("half") -> 0.5
-                m.groupValues[1].lowercase() in listOf("a", "an") -> 1.0
-                else -> m.groupValues[1].toDouble()
+                w.startsWith("half") -> 0.5
+                w.contains("couple") -> 2.0
+                w.contains("few") -> 3.0
+                w in listOf("a", "an") -> 1.0
+                w in WORDS -> WORDS.getValue(w).toDouble()
+                else -> w.toDouble()
             }
             val u = m.groupValues[2].lowercase()
             when {
@@ -167,8 +177,14 @@ object Parser {
 
         val tail = Regex("(?:\\s|^)(?:by|before|at|on|due|for|until|till|in|this|next|@)\\s*$", I)
         var title = s.replace(Regex("\\s+"), " ").trim()
-        repeat(2) { title = title.replace(tail, "") }
-        title = title.trim().trim(',', ';', '-', ' ')
+            .replace(Regex("\\s+([.,!?;:])"), "$1")           // "fence ." → "fence."
+            .replace(Regex("([.,!?;:])\\1+"), "$1")
+        title = title.replace(LEAD, "")                        // "remind me to fix the fence" → "fix the fence"
+        repeat(3) {
+            title = title.trim().trimEnd('.', ',', ';', ':', '!', '?', '-', ' ').replace(tail, "")
+                .replace(Regex("(?:\\s|^)(?:please|thanks|thank you|ok|okay)$", I), "")
+        }
+        title = title.trim().trim(',', ';', '-', ' ', '.')
         if (title.isNotEmpty()) title = title.substring(0, 1).uppercase() + title.substring(1)
         return Parsed(title, due, allDay, kind)
     }
