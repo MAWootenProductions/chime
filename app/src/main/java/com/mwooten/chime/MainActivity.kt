@@ -56,7 +56,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.mwooten.chime.data.Parser
+import com.mwooten.chime.data.Brain
+import com.mwooten.chime.data.focusQuest
+import com.mwooten.chime.projects.ProjectsScreen
+import com.mwooten.chime.worlds.SpillInput
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import com.mwooten.chime.data.Quest
 import com.mwooten.chime.data.QuestStore
 import com.mwooten.chime.data.Settings
@@ -81,6 +87,7 @@ data class MoteMessage(val text: String, val questId: String?)
 
 class MainActivity : ComponentActivity() {
     private val incoming = mutableStateOf<MoteMessage?>(null)
+    private val goTo = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,8 +95,9 @@ class MainActivity : ComponentActivity() {
         QuestStore.load(this)
         Scheduler.rescheduleAll(this)
         Scheduler.scheduleGentle(this)
+        Scheduler.schedulePoll(this)
         readIntent(intent)
-        setContent { ChimeRoot(incoming.value) { incoming.value = null } }
+        setContent { ChimeRoot(incoming.value, goTo.value, { goTo.value = null }) { incoming.value = null } }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -98,6 +106,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun readIntent(i: Intent?) {
+        i?.getStringExtra(Notifier.EXTRA_SCREEN)?.let { goTo.value = it; i.removeExtra(Notifier.EXTRA_SCREEN) }
         val msg = i?.getStringExtra(Notifier.EXTRA_MESSAGE) ?: return
         incoming.value = MoteMessage(msg, i.getStringExtra(Notifier.EXTRA_QUEST))
         i.removeExtra(Notifier.EXTRA_MESSAGE)
@@ -106,8 +115,10 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ChimeRoot(incoming: MoteMessage?, consumeIncoming: () -> Unit) {
+fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, consumeIncoming: () -> Unit) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var thinking by remember { mutableStateOf(false) }
     val quests by QuestStore.quests.collectAsState()
     var screen by rememberSaveable { mutableStateOf("world") }
     var view by rememberSaveable { mutableStateOf("ahead") }
@@ -132,6 +143,8 @@ fun ChimeRoot(incoming: MoteMessage?, consumeIncoming: () -> Unit) {
     fun say(s: String) { toast = s; toastKey++ }
     LaunchedEffect(toastKey) { if (toast != null) { delay(2600); toast = null } }
 
+    LaunchedEffect(goTo) { if (goTo != null) { screen = goTo; consumeGoTo() } }
+
     LaunchedEffect(incoming) {
         if (incoming != null) { letter = incoming; screen = "world"; consumeIncoming() }
     }
@@ -151,11 +164,14 @@ fun ChimeRoot(incoming: MoteMessage?, consumeIncoming: () -> Unit) {
                 say(if (minutes >= 60) "Later: back in ${minutes / 60} hour${if (minutes >= 120) "s" else ""}." else "Later: back in $minutes minutes.")
             }
             override fun spill(text: String) {
-                val p = Parser.parse(text)
-                if (p.title.isBlank()) { say("Add a few words about what needs doing."); return }
-                val q = Quest(Quest.newId(), p.title, p.due, p.allDay, p.kind)
-                QuestStore.upsert(ctx, q)
-                say("Added “${q.text}” · ${q.label()}")
+                if (text.isBlank()) return
+                thinking = true
+                letter = MoteMessage("…", null)
+                scope.launch {
+                    val r = Brain.handle(ctx, text, null)
+                    thinking = false
+                    letter = MoteMessage(r.reply, focusQuest(QuestStore.all(ctx))?.id)
+                }
             }
             override fun openLog() { screen = "log" }
             override fun openOptions() { screen = "options" }
@@ -172,12 +188,14 @@ fun ChimeRoot(incoming: MoteMessage?, consumeIncoming: () -> Unit) {
                     ForestScene(Modifier.fillMaxSize(), dim = 1f)
                     LogScreen(quests, view, { view = it }, { screen = "world" }, { screen = "world" }, { actions.done(it) }) { sheetId = it.id }
                 }
+                "projects" -> ProjectsScreen { screen = "options" }
                 "options" -> OptionsScreen(
                     focus = state.focus,
                     onClose = { screen = "world" },
                     onChanged = { settingsRev++ },
                     toast = ::say,
                     requestNotifications = ::requestNotifications,
+                    onOpenProjects = { screen = "projects" },
                 )
                 else -> WorldHost(worldId, state, actions)
             }
@@ -185,7 +203,7 @@ fun ChimeRoot(incoming: MoteMessage?, consumeIncoming: () -> Unit) {
 
         // a message the companion was holding for you
         val l = letter
-        AnimatedVisibility(l != null, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp),
+        AnimatedVisibility(l != null && screen == "world", Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(16.dp),
             enter = fadeIn() + slideInVertically { it / 3 }, exit = fadeOut() + slideOutVertically { it / 3 }) {
             val lq = l?.questId?.let { id -> quests.firstOrNull { it.id == id } }
             Column(
@@ -204,8 +222,25 @@ fun ChimeRoot(incoming: MoteMessage?, consumeIncoming: () -> Unit) {
                         LetterButton("Later", false, companion.color) { actions.snooze(lq, 30); letter = null }
                         LetterButton("Open", false, companion.color) { sheetId = lq.id; letter = null }
                     }
-                    LetterButton("Thanks", false, companion.color) { letter = null }
+                    LetterButton("Close", false, companion.color) { letter = null }
                 }
+                if (!thinking) SpillInput(
+                    onSpill = { text ->
+                        val about = l?.questId
+                        thinking = true
+                        letter = MoteMessage("…", about)
+                        scope.launch {
+                            val r = Brain.handle(ctx, text, about)
+                            thinking = false
+                            letter = MoteMessage(r.reply, about?.let { id -> QuestStore.get(ctx, id)?.takeIf { !it.done }?.id } ?: focusQuest(QuestStore.all(ctx))?.id)
+                        }
+                    },
+                    textStyle = T.body.copy(fontFamily = Fonts.nunito, fontWeight = FontWeight.W600, fontSize = 16.sp, color = Color(0xFF1B1A17)),
+                    placeholder = "Reply to ${companion.title}…",
+                    placeholderColor = Color(0xFF8A857A),
+                    cursor = Color(companion.color),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color.White).padding(horizontal = 14.dp, vertical = 12.dp),
+                )
             }
         }
 

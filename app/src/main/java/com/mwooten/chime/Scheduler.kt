@@ -23,6 +23,7 @@ object Scheduler {
     const val ACTION_FOLLOWUP = "com.mwooten.chime.FOLLOWUP"
     const val ACTION_GENTLE = "com.mwooten.chime.GENTLE"
     const val ACTION_TEST = "com.mwooten.chime.TEST"
+    const val ACTION_POLL = "com.mwooten.chime.POLL"
     const val EXTRA_ID = "id"
     const val EXTRA_KEY = "key"
 
@@ -92,6 +93,13 @@ object Scheduler {
         if (t.isBefore(LocalTime.of(9, 0))) at = at.toLocalDate().atTime(9, Random.nextInt(0, 40))
         else if (t.isAfter(LocalTime.of(21, 0))) at = at.toLocalDate().plusDays(1).atTime(9, Random.nextInt(0, 40))
         am(ctx).setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, Time.ms(at), p)
+    }
+
+    /** Check GitHub projects roughly every 10 minutes (Android may stretch this when the phone is idle). */
+    fun schedulePoll(ctx: Context) {
+        val p = pi(ctx, ACTION_POLL, "poll", null)
+        if (Settings.githubToken(ctx).isBlank()) { am(ctx).cancel(p); return }
+        am(ctx).setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 10 * 60_000L, p)
     }
 
     fun testCall(ctx: Context, seconds: Int = 5) {

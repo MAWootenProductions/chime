@@ -92,6 +92,24 @@ object Settings {
     fun companion(ctx: Context): Companion = Companion.byName(p(ctx).getString("companion", "WREN"))
     fun setCompanion(ctx: Context, v: Companion) = p(ctx).edit().putString("companion", v.name).apply()
 
+    /** Anthropic API key for smart replies (kept in this app's private storage on the phone). */
+    fun apiKey(ctx: Context): String = p(ctx).getString("api_key", "")!!
+    fun setApiKey(ctx: Context, v: String) = p(ctx).edit().putString("api_key", v.trim()).apply()
+
+    /** GitHub token for the project tracker. */
+    fun githubToken(ctx: Context): String = p(ctx).getString("gh_token", "")!!
+    fun setGithubToken(ctx: Context, v: String) = p(ctx).edit().putString("gh_token", v.trim()).apply()
+
+    /** Repos the tracker ignores ("owner/name"). Everything else pushed in the last 30 days is tracked. */
+    fun mutedRepos(ctx: Context): Set<String> = p(ctx).getStringSet("muted_repos", emptySet())!!.toSet()
+    fun setMuted(ctx: Context, repo: String, muted: Boolean) {
+        val s = mutedRepos(ctx).toMutableSet(); if (muted) s += repo else s -= repo
+        p(ctx).edit().putStringSet("muted_repos", s).apply()
+    }
+
+    /** Raw prefs for small JSON blobs (chat history, tracker cursors). */
+    fun raw(ctx: Context) = p(ctx)
+
     fun rings(ctx: Context): Boolean = p(ctx).getBoolean("rings", true)
     fun setRings(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("rings", v).apply()
 

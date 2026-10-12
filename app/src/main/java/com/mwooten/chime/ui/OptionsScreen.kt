@@ -82,6 +82,7 @@ fun OptionsScreen(
     onChanged: () -> Unit,
     toast: (String) -> Unit,
     requestNotifications: () -> Unit,
+    onOpenProjects: () -> Unit,
 ) {
     val ctx = LocalContext.current
     var page by rememberSaveable { mutableStateOf("top") }
@@ -103,12 +104,16 @@ fun OptionsScreen(
                     "companion" -> CompanionPicker(focus) { Settings.setCompanion(ctx, it); onChanged(); toast("${it.title} is with you now."); onClose() }
                     "reminders" -> Reminders(ctx, toast) { tick++ }
                     "permissions" -> Permissions(ctx, requestNotifications)
+                    "brain" -> SmartReplies(ctx, toast) { page = "top" }
                     else -> {
                         Text("Options", style = head)
                         Spacer(Modifier.height(6.dp))
                         val w = WorldId.byName(Settings.world(ctx)); val c = Settings.companion(ctx)
                         TopRow("World", w.title) { page = "world" }
                         TopRow("Companion", "${c.title} · ${c.trait.lowercase()}", Color(c.color)) { page = "companion" }
+                        TopRow("Smart replies", if (Settings.apiKey(ctx).isNotBlank()) "On · powered by Claude" else "Basic · add an API key to turn on",
+                            if (Settings.apiKey(ctx).isNotBlank()) Color(0xFF9FD6A0) else null) { page = "brain" }
+                        TopRow("Projects", if (Settings.githubToken(ctx).isNotBlank()) "Tracking your GitHub repos" else "Connect GitHub to track Claude's work") { onOpenProjects() }
                         TopRow("Reminders", "${Settings.chatter(ctx)} check-ins · ${if (Settings.rings(ctx)) "rings" else "chimes"}") { page = "reminders" }
                         TopRow("Permissions", if (allGranted(ctx)) "All set" else "Needs attention", if (allGranted(ctx)) null else Color(0xFFE58A5F)) { page = "permissions" }
                     }
@@ -219,6 +224,32 @@ private fun CompanionPicker(focus: Quest?, onPick: (Companion) -> Unit) {
     Spacer(Modifier.height(4.dp))
     Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(sel.color)).clickable { onPick(sel) }.padding(16.dp), contentAlignment = Alignment.Center) {
         Text("Travel with ${sel.title}", style = rowT.copy(color = Ink))
+    }
+}
+
+@Composable
+private fun SmartReplies(ctx: Context, toast: (String) -> Unit, done: () -> Unit) {
+    var key by remember { mutableStateOf(Settings.apiKey(ctx)) }
+    Text("Smart replies", style = head.copy(fontSize = 30.sp))
+    Text("Talk back in your own words, in any spill box or straight from a notification: “thanks, don't worry about this today”, “did it”, “push the dentist to Thursday and add milk”. Your companion understands, makes the change, and answers in character.", style = small)
+    Spacer(Modifier.height(4.dp))
+    Text("Without a key, Chime still understands the basics (done, later, not today, thanks). With a key it understands anything.", style = small)
+    Spacer(Modifier.height(4.dp))
+    Text("1. Go to console.anthropic.com → API Keys → Create Key.", style = rowT.copy(fontSize = 15.sp, fontWeight = FontWeight.W600))
+    Text("2. Paste it below. It stays on this phone. Each reply costs a fraction of a cent.", style = rowT.copy(fontSize = 15.sp, fontWeight = FontWeight.W600))
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFF1C1E26)).padding(14.dp)) {
+        if (key.isEmpty()) Text("sk-ant-…", style = small)
+        androidx.compose.foundation.text.BasicTextField(key, { key = it.trim() }, singleLine = true,
+            textStyle = small.copy(color = Paper, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(Paper), modifier = Modifier.fillMaxWidth())
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Paper).clickable {
+            Settings.setApiKey(ctx, key); toast(if (key.isBlank()) "Smart replies off." else "Smart replies on."); done()
+        }.padding(14.dp), contentAlignment = Alignment.Center) { Text("Save", style = rowT.copy(color = Ink)) }
+        if (Settings.apiKey(ctx).isNotBlank()) Box(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF1C1E26)).clickable {
+            Settings.setApiKey(ctx, ""); key = ""; toast("Smart replies off."); done()
+        }.padding(14.dp), contentAlignment = Alignment.Center) { Text("Remove key", style = rowT) }
     }
 }
 

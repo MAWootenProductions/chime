@@ -35,6 +35,11 @@ object Notifier {
     const val EXTRA_MESSAGE = "mote_message"
     const val EXTRA_QUEST = "mote_quest"
     const val EXTRA_ANSWERED = "answered"
+    const val EXTRA_CONVO = "convo"
+    const val EXTRA_SCREEN = "screen"
+    const val ACTION_REPLY = "com.mwooten.chime.REPLY"
+    const val KEY_REPLY = "reply"
+    const val CH_PROJECTS = "projects_v1"
 
     private fun raw(ctx: Context, name: String): Uri =
         Uri.parse(ContentResolver.SCHEME_ANDROID_RESOURCE + "://" + ctx.packageName + "/raw/" + name)
@@ -58,7 +63,13 @@ object Notifier {
             enableVibration(true)
             vibrationPattern = longArrayOf(0, 120, 90, 120)
         }
-        nm.createNotificationChannels(listOf(calls, nudges))
+        val projects = NotificationChannel(CH_PROJECTS, "Project updates", NotificationManager.IMPORTANCE_DEFAULT).apply {
+            description = "When a Claude project pushes, opens a pull request, or finishes a build"
+            setSound(raw(ctx, "mote_chime"), AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+        }
+        nm.createNotificationChannels(listOf(calls, nudges, projects))
     }
 
     /** Mote's portrait for the call screen: a soft green-gold glow. */
@@ -130,28 +141,71 @@ object Notifier {
 
     fun stopRinging(ctx: Context) = NotificationManagerCompat.from(ctx).cancel(CALL_NOTIF_ID)
 
-    /** A gentle "Psst! Over here!" — tap to hear what Mote has to say. */
-    fun nudge(ctx: Context, message: String, q: Quest?) {
+    /**
+     * A nudge that reads like a text from your companion. You can reply right from the notification;
+     * the reply goes to [Brain] and the answer is added to the same conversation.
+     * [convo] holds earlier turns (true = you, false = companion) when re-posting after a reply.
+     */
+    fun nudge(ctx: Context, message: String, q: Quest?, convo: List<Pair<Boolean, String>> = emptyList(), silent: Boolean = false) {
+        val who = Settings.companion(ctx)
         val open = Intent(ctx, MainActivity::class.java)
             .putExtra(EXTRA_MESSAGE, message)
             .putExtra(EXTRA_QUEST, q?.id)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val tap = PendingIntent.getActivity(ctx, 20, open, flags())
+        val me = Person.Builder().setName("You").build()
+        val style = NotificationCompat.MessagingStyle(me)
+        val t0 = System.currentTimeMillis() - 1000L * (convo.size + 2)
+        if (convo.isEmpty()) {
+            style.addMessage(who.callout, t0, mote(ctx))
+            style.addMessage(message, t0 + 500, mote(ctx))
+        } else {
+            convo.forEachIndexed { i, (mine, text) -> style.addMessage(text, t0 + i * 500L, if (mine) null else mote(ctx)) }
+        }
         val b = NotificationCompat.Builder(ctx, CH_NUDGES)
             .setSmallIcon(R.drawable.ic_stat_mote)
-            .setContentTitle(Settings.companion(ctx).title)
-            .setContentText(MoteVoice.callout(ctx))
-            .setSubText("Tap to listen")
-            .setColor(Settings.companion(ctx).color.toInt())
+            .setContentTitle(who.title)
+            .setContentText(if (convo.isEmpty()) who.callout else convo.last().second)
+            .setStyle(style)
+            .setColor(who.color.toInt())
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
+            .setOnlyAlertOnce(silent)
             .setContentIntent(tap)
+        val replyIntent = Intent(ctx, ReplyReceiver::class.java).setAction(ACTION_REPLY)
+            .putExtra(Scheduler.EXTRA_ID, q?.id)
+            .putExtra(EXTRA_CONVO, org.json.JSONArray().apply {
+                val turns = if (convo.isEmpty()) listOf(false to message) else convo
+                turns.forEach { (mine, text) -> put(org.json.JSONObject().put("me", mine).put("t", text)) }
+            }.toString())
+        val replyPi = PendingIntent.getBroadcast(ctx, 23, replyIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
+        val remote = androidx.core.app.RemoteInput.Builder(KEY_REPLY).setLabel("Reply to ${who.title}").build()
+        b.addAction(NotificationCompat.Action.Builder(0, "Reply", replyPi).addRemoteInput(remote).setAllowGeneratedReplies(true).build())
         if (q != null && !q.done) {
             b.addAction(0, "Done it", broadcast(ctx, ACTION_DONE, q.id, 21))
-            b.addAction(0, "Snooze 30 min", broadcast(ctx, ACTION_SNOOZE, q.id, 22))
+            b.addAction(0, "Later", broadcast(ctx, ACTION_SNOOZE, q.id, 22))
         }
         try { NotificationManagerCompat.from(ctx).notify(NUDGE_NOTIF_ID, b.build()) } catch (e: SecurityException) { }
+    }
+
+    /** Project tracker update, in the companion's voice. */
+    fun project(ctx: Context, id: Int, title: String, text: String, url: String?) {
+        val who = Settings.companion(ctx)
+        val open = if (url != null) Intent(Intent.ACTION_VIEW, Uri.parse(url)) else Intent(ctx, MainActivity::class.java).putExtra(EXTRA_SCREEN, "projects")
+        val pi = PendingIntent.getActivity(ctx, 3000 + id % 1000, open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), flags())
+        val n = NotificationCompat.Builder(ctx, CH_PROJECTS)
+            .setSmallIcon(R.drawable.ic_stat_mote)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setSubText("${who.title} · Projects")
+            .setColor(who.color.toInt())
+            .setGroup("projects")
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .build()
+        try { NotificationManagerCompat.from(ctx).notify(5000 + id % 10000, n) } catch (e: SecurityException) { }
     }
 
     fun canRingFullScreen(ctx: Context): Boolean =
