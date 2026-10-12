@@ -2,6 +2,8 @@ package com.mwooten.chime.data
 
 import android.content.Context
 import com.mwooten.chime.Scheduler
+import com.mwooten.chime.worlds.Finish
+import com.mwooten.chime.worlds.Look
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONArray
@@ -91,6 +93,18 @@ object Settings {
 
     fun companion(ctx: Context): Companion = Companion.byName(p(ctx).getString("companion", "WREN"))
     fun setCompanion(ctx: Context, v: Companion) = p(ctx).edit().putString("companion", v.name).apply()
+
+    /** What the Simple-mode companion looks like. Picking a look also puts on that look's default finish. */
+    fun look(ctx: Context): Look = Look.byName(p(ctx).getString("look", Look.STAR.name))
+    fun setLook(ctx: Context, v: Look) = p(ctx).edit().putString("look", v.name).putString("finish", v.defaultFinish.name).apply()
+
+    /** The material the look is cast in. */
+    fun finish(ctx: Context): Finish = Finish.byName(p(ctx).getString("finish", Finish.AMBER.name))
+    fun setFinish(ctx: Context, v: Finish) = p(ctx).edit().putString("finish", v.name).apply()
+
+    /** First-run setup (look, color, personality) has been finished. */
+    fun setupDone(ctx: Context): Boolean = p(ctx).getBoolean("setup_done", false)
+    fun setSetupDone(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("setup_done", v).apply()
 
     /** Anthropic API key for smart replies (kept in this app's private storage on the phone). */
     fun apiKey(ctx: Context): String = p(ctx).getString("api_key", "")!!

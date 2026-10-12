@@ -74,6 +74,7 @@ import com.mwooten.chime.ui.ForestScene
 import com.mwooten.chime.ui.LogScreen
 import com.mwooten.chime.ui.OptionsScreen
 import com.mwooten.chime.ui.QuestSheet
+import com.mwooten.chime.ui.SetupScreen
 import com.mwooten.chime.ui.T
 import com.mwooten.chime.ui.Toast
 import com.mwooten.chime.worlds.WorldActions
@@ -134,6 +135,7 @@ fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, co
     var settingsRev by remember { mutableIntStateOf(0) }
     var letter by remember { mutableStateOf<MoteMessage?>(null) }
     var optionsPage by remember { mutableStateOf("top") }
+    var setupDone by remember { mutableStateOf(Settings.setupDone(ctx)) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
     // keep "time left" text fresh
@@ -175,7 +177,7 @@ fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, co
     val actions = remember {
         object : WorldActions {
             override fun done(q: Quest) {
-                if (!q.done) com.mwooten.chime.worlds.Bell.strike(ctx, companion)
+                if (!q.done) com.mwooten.chime.worlds.Bell.strike(ctx, Settings.companion(ctx))
                 QuestStore.setDone(ctx, q.id, !q.done)
                 if (!q.done) say("Done: ${q.text}")
             }
@@ -188,6 +190,7 @@ fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, co
             override fun openOptions() { optionsPage = "top"; screen = "options" }
             override fun openPersonality() { optionsPage = "companion"; screen = "options" }
             override fun openMode() { optionsPage = "world"; screen = "options" }
+            override fun openLook() { optionsPage = "look"; screen = "options" }
             override fun openQuest(q: Quest) { sheetId = q.id }
         }
     }
@@ -211,7 +214,7 @@ fun ChimeRoot(incoming: MoteMessage?, goTo: String?, consumeGoTo: () -> Unit, co
                     onOpenProjects = { screen = "projects" },
                     startPage = optionsPage,
                 )
-                else -> WorldHost(worldId, state, actions)
+                else -> if (!setupDone) SetupScreen { setupDone = true; settingsRev++ } else WorldHost(worldId, state, actions)
             }
         }
 

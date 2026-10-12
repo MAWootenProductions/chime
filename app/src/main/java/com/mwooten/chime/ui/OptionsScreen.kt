@@ -58,6 +58,9 @@ import com.mwooten.chime.data.Quest
 import com.mwooten.chime.data.QuestStore
 import com.mwooten.chime.data.Settings
 import com.mwooten.chime.worlds.Category
+import com.mwooten.chime.worlds.Character
+import com.mwooten.chime.worlds.Finish
+import com.mwooten.chime.worlds.Look
 import com.mwooten.chime.worlds.WorldId
 import kotlinx.coroutines.delay
 
@@ -104,6 +107,7 @@ fun OptionsScreen(
                 when (p) {
                     "world" -> WorldPicker { Settings.setWorld(ctx, it.name); onChanged(); toast("Switched to ${it.title} mode."); onClose() }
                     "companion" -> CompanionPicker(focus) { Settings.setCompanion(ctx, it); onChanged(); toast("${it.title} is with you now."); onClose() }
+                    "look" -> LookPicker(onChanged)
                     "reminders" -> Reminders(ctx, toast) { tick++ }
                     "permissions" -> Permissions(ctx, requestNotifications)
                     "brain" -> SmartReplies(ctx, toast) { page = "top" }
@@ -111,6 +115,8 @@ fun OptionsScreen(
                         Text("Settings", style = head)
                         Spacer(Modifier.height(6.dp))
                         val w = WorldId.byName(Settings.world(ctx)); val c = Settings.companion(ctx)
+                        val lk = Settings.look(ctx); val fin = Settings.finish(ctx)
+                        TopRow("Look", "${lk.title} · ${fin.title}", Color(fin.c)) { page = "look" }
                         TopRow("Mode", w.title) { page = "world" }
                         TopRow("Personality", "${c.title} · ${c.trait.lowercase()}", Color(c.color)) { page = "companion" }
                         TopRow("Smart replies", if (Settings.apiKey(ctx).isNotBlank()) "On · powered by Claude" else "Basic · add an API key to turn on",
@@ -227,6 +233,67 @@ private fun CompanionPicker(focus: Quest?, onPick: (Companion) -> Unit) {
     Spacer(Modifier.height(4.dp))
     Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(sel.color)).clickable { onPick(sel) }.padding(16.dp), contentAlignment = Alignment.Center) {
         Text("Travel with ${sel.title}", style = rowT.copy(color = Ink))
+    }
+}
+
+/** Pick the companion's look (six bodies) and finish (ten materials). Saves as you tap. */
+@Composable
+private fun LookPicker(onChanged: () -> Unit) {
+    val ctx = LocalContext.current
+    val who = Settings.companion(ctx)
+    var look by remember { mutableStateOf(Settings.look(ctx)) }
+    var finish by remember { mutableStateOf(Settings.finish(ctx)) }
+    fun pickLook(l: Look) { Settings.setLook(ctx, l); look = l; finish = l.defaultFinish; onChanged() }
+    fun pickFinish(f: Finish) { Settings.setFinish(ctx, f); finish = f; onChanged() }
+
+    Text("Choose a look", style = head.copy(fontSize = 30.sp))
+    Text("How ${who.title} shows up in Simple mode. The personality still sets the voice and the face.", style = small)
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Character(look, finish, who, 0f, false, 220.dp, draggable = true) { com.mwooten.chime.worlds.Bell.strike(ctx, who) }
+    }
+    Text("${look.title} · ${finish.title}", style = rowT.copy(fontFamily = Fonts.fraunces, fontSize = 22.sp), modifier = Modifier.fillMaxWidth(),
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+
+    Spacer(Modifier.height(6.dp))
+    Text("LOOK", style = eyebrow)
+    Look.entries.chunked(3).forEach { row ->
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            row.forEach { l ->
+                val on = l == look
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(Color(0xFF1C1E26))
+                    .border(2.dp, if (on) Paper else Color.Transparent, RoundedCornerShape(16.dp))
+                    .clickable { pickLook(l) }.padding(vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Character(l, if (on) finish else l.defaultFinish, who, 0f, false, 96.dp, draggable = false) { pickLook(l) }
+                    Text(l.title, style = small.copy(color = if (on) Paper else Dim), maxLines = 1)
+                }
+            }
+        }
+    }
+
+    Spacer(Modifier.height(10.dp))
+    Text("COLOR", style = eyebrow)
+    Finish.entries.chunked(5).forEach { row ->
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            row.forEach { f ->
+                val on = f == finish
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { pickFinish(f) }.padding(vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FinishSwatch(f, on)
+                    Text(f.title, style = small.copy(fontSize = 12.sp, lineHeight = 14.sp, color = if (on) Paper else Dim),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center, maxLines = 2)
+                }
+            }
+        }
+    }
+    Text(finish.about, style = small.copy(color = Paper.copy(alpha = .8f), lineHeight = 20.sp))
+}
+
+/** A round chip of a finish: highlight, body and shadow in one gradient. */
+@Composable
+internal fun FinishSwatch(f: Finish, on: Boolean, ring: Color = Paper) {
+    Box(Modifier.size(50.dp).border(2.dp, if (on) ring else Color.Transparent, CircleShape).padding(3.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(44.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Color(f.light), Color(f.c), Color(f.dark)))))
     }
 }
 

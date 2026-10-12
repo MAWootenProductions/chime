@@ -93,6 +93,10 @@ private enum class Mic { IDLE, LISTENING, HEARD, ERROR }
 fun SimpleWorld(s: WorldState, a: WorldActions) {
     val ctx = LocalContext.current
     val who = s.companion
+    val look = Settings.look(ctx)
+    val finish = Settings.finish(ctx)
+    val accent = Color(finish.c)
+    val accentLight = Color(finish.light)
     var mic by remember { mutableStateOf(Mic.IDLE) }
     var heard by remember { mutableStateOf("") }
     var level by remember { mutableFloatStateOf(0f) }
@@ -143,7 +147,7 @@ fun SimpleWorld(s: WorldState, a: WorldActions) {
     Box(Modifier.fillMaxSize().background(SBg)) {
         // a faint wash of the companion's color behind everything
         Canvas(Modifier.fillMaxSize()) {
-            drawRect(Brush.radialGradient(listOf(who.c.copy(alpha = .16f), Color.Transparent), Offset(size.width / 2, size.height * .42f), size.width * .9f))
+            drawRect(Brush.radialGradient(listOf(accent.copy(alpha = .16f), Color.Transparent), Offset(size.width / 2, size.height * .42f), size.width * .9f))
         }
 
         Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(horizontal = 22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -165,9 +169,9 @@ fun SimpleWorld(s: WorldState, a: WorldActions) {
 
             // the sphere
             // your companion: tap to talk, drag it around
-            Sprite(who, level, mic == Mic.LISTENING, 300.dp) { tapSphere() }
+            Character(look, finish, who, level, mic == Mic.LISTENING, 300.dp) { tapSphere() }
             Spacer(Modifier.height(18.dp))
-            Text(who.title.uppercase(), style = sEyebrow.copy(color = who.cLight.copy(alpha = .8f)))
+            Text(who.title.uppercase(), style = sEyebrow.copy(color = accentLight.copy(alpha = .8f)))
             Spacer(Modifier.height(8.dp))
             Box(Modifier.height(100.dp).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                 val line = when (mic) {
@@ -187,7 +191,7 @@ fun SimpleWorld(s: WorldState, a: WorldActions) {
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(SCard)
                 .clickable { if (f != null) a.openQuest(f) else a.openLog() }.padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(if (f != null && s.overdueCount > 0) Color(0xFFEF6A55) else who.c))
+                Box(Modifier.size(8.dp).clip(CircleShape).background(if (f != null && s.overdueCount > 0) Color(0xFFEF6A55) else accent))
                 Column(Modifier.weight(1f)) {
                     Text(if (f == null) "NOTHING YET" else "NEXT", style = sEyebrow)
                     Text(f?.text ?: "Your list is empty.", style = sUi.copy(fontWeight = FontWeight.W600, fontSize = 16.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -214,10 +218,10 @@ fun SimpleWorld(s: WorldState, a: WorldActions) {
                     textStyle = sUi.copy(fontSize = 17.sp),
                     placeholder = "grocery store at 2pm",
                     placeholderColor = SMute,
-                    cursor = who.c,
+                    cursor = accent,
                     modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp).clip(RoundedCornerShape(16.dp)).background(SCard).padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
                     trailing = { submit ->
-                        Box(Modifier.size(44.dp).clip(CircleShape).background(who.c).clickable { submit() }, contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(44.dp).clip(CircleShape).background(accent).clickable { submit() }, contentAlignment = Alignment.Center) {
                             Canvas(Modifier.size(16.dp)) {
                                 val w = size.width
                                 drawLine(SBg, Offset(w / 2, w * .9f), Offset(w / 2, w * .1f), 2.2.dp.toPx(), StrokeCap.Round)
@@ -232,7 +236,8 @@ fun SimpleWorld(s: WorldState, a: WorldActions) {
 
         // the small menu: only the things you'd actually want from here
         AnimatedVisibility(menu, Modifier.align(Alignment.TopEnd).systemBarsPadding().padding(top = 62.dp, end = 22.dp), enter = fadeIn(), exit = fadeOut()) {
-            Column(Modifier.width(240.dp).clip(RoundedCornerShape(18.dp)).background(Color(0xFF1F1F25)).border(1.dp, Color(0xFF2E2E36), RoundedCornerShape(18.dp)).padding(6.dp)) {
+            Column(Modifier.width(280.dp).clip(RoundedCornerShape(18.dp)).background(Color(0xFF1F1F25)).border(1.dp, Color(0xFF2E2E36), RoundedCornerShape(18.dp)).padding(6.dp)) {
+                SimpleMenuItem("Look", "${look.title} · ${finish.title}") { menu = false; a.openLook() }
                 SimpleMenuItem("Personality", who.title) { menu = false; a.openPersonality() }
                 SimpleMenuItem("Mode", "Simple") { menu = false; a.openMode() }
                 SimpleMenuItem("Your list", "${s.open.size} open") { menu = false; a.openLog() }
@@ -246,9 +251,9 @@ fun SimpleWorld(s: WorldState, a: WorldActions) {
                 Column(Modifier.align(Alignment.BottomCenter).systemBarsPadding().padding(18.dp).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(SInk).padding(22.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text("How Chime works", style = TextStyle(fontFamily = Fonts.newsreader, fontWeight = FontWeight.W600, fontSize = 26.sp, color = SBg))
-                    HowStep("1", "Tap the sphere and say what you need to do.", "“Grocery store at 2pm.”  “Call Mom tomorrow.”", who.c)
-                    HowStep("2", "Check what I heard, then tap Confirm.", "Wrong? Just say the fix.", who.c)
-                    HowStep("3", "When it's time, ${who.title} calls you.", "Answer, or reply right from the notification.", who.c)
+                    HowStep("1", "Tap the sphere and say what you need to do.", "“Grocery store at 2pm.”  “Call Mom tomorrow.”", accent)
+                    HowStep("2", "Check what I heard, then tap Confirm.", "Wrong? Just say the fix.", accent)
+                    HowStep("3", "When it's time, ${who.title} calls you.", "Answer, or reply right from the notification.", accent)
                     Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(SBg).clickable {
                         Settings.raw(ctx).edit().putBoolean("howto_seen", true).apply(); howTo = false
                     }.padding(15.dp), contentAlignment = Alignment.Center) {
@@ -264,8 +269,10 @@ fun SimpleWorld(s: WorldState, a: WorldActions) {
 private fun SimpleMenuItem(title: String, value: String, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Text(title, style = sUi.copy(fontWeight = FontWeight.W600, fontSize = 16.sp), modifier = Modifier.weight(1f))
-        if (value.isNotEmpty()) Text(value, style = sUi.copy(color = SMute, fontSize = 14.sp))
+        Text(title, style = sUi.copy(fontWeight = FontWeight.W600, fontSize = 16.sp))
+        Spacer(Modifier.width(12.dp))
+        Text(value, style = sUi.copy(color = SMute, fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.End, modifier = Modifier.weight(1f))
     }
 }
 

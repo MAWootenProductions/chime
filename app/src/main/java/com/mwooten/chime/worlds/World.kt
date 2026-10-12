@@ -49,6 +49,8 @@ interface WorldActions {
     fun openPersonality() = openOptions()
     /** Jump straight to the mode picker. */
     fun openMode() = openOptions()
+    /** Jump straight to the look and color picker. */
+    fun openLook() = openOptions()
 }
 
 enum class Category(val title: String) {
