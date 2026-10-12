@@ -20,6 +20,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.graphics.drawable.IconCompat
 import com.mwooten.chime.data.Quest
+import com.mwooten.chime.data.Settings
 
 object Notifier {
     const val CH_CALLS = "mote_calls_v1"
@@ -40,7 +41,7 @@ object Notifier {
 
     fun createChannels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
-        val calls = NotificationChannel(CH_CALLS, "Mote's calls", NotificationManager.IMPORTANCE_HIGH).apply {
+        val calls = NotificationChannel(CH_CALLS, "Companion calls", NotificationManager.IMPORTANCE_HIGH).apply {
             description = "Rings like an incoming call when a quest is due"
             setSound(raw(ctx, "mote_call"), AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
@@ -49,7 +50,7 @@ object Notifier {
             vibrationPattern = longArrayOf(0, 300, 180, 300, 900)
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         }
-        val nudges = NotificationChannel(CH_NUDGES, "Mote's nudges", NotificationManager.IMPORTANCE_HIGH).apply {
+        val nudges = NotificationChannel(CH_NUDGES, "Companion nudges", NotificationManager.IMPORTANCE_HIGH).apply {
             description = "Gentle check-ins and follow-ups"
             setSound(raw(ctx, "mote_chime"), AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_NOTIFICATION)
@@ -61,7 +62,8 @@ object Notifier {
     }
 
     /** Mote's portrait for the call screen: a soft green-gold glow. */
-    private fun moteBitmap(): Bitmap {
+    private fun moteBitmap(ctx: Context): Bitmap {
+        val who = Settings.companion(ctx)
         val s = 192
         val b = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
         val c = Canvas(b)
@@ -69,16 +71,16 @@ object Notifier {
         c.drawCircle(s / 2f, s / 2f, s / 2f, bg)
         val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             shader = RadialGradient(s / 2f, s / 2f, s * 0.42f,
-                intArrayOf(0xFFF6FFE8.toInt(), 0xFFD7F7B8.toInt(), 0x668FD47A, 0x008FD47A),
+                intArrayOf(0xFFFFFFFF.toInt(), who.light.toInt(), who.color.toInt(), (who.color and 0x00FFFFFFL).toInt()),
                 floatArrayOf(0f, 0.2f, 0.5f, 1f), Shader.TileMode.CLAMP)
         }
         c.drawCircle(s / 2f, s / 2f, s * 0.42f, p)
         return b
     }
 
-    private fun mote(): Person = Person.Builder()
-        .setName("Mote")
-        .setIcon(IconCompat.createWithBitmap(moteBitmap()))
+    private fun mote(ctx: Context): Person = Person.Builder()
+        .setName(Settings.companion(ctx).title)
+        .setIcon(IconCompat.createWithBitmap(moteBitmap(ctx)))
         .setImportant(true)
         .build()
 
@@ -103,19 +105,19 @@ object Notifier {
         val decline = broadcast(ctx, ACTION_DECLINE, id, 12)
         val b = NotificationCompat.Builder(ctx, CH_CALLS)
             .setSmallIcon(R.drawable.ic_stat_mote)
-            .setContentTitle("Mote")
-            .setContentText(MoteVoice.CALLOUT)
+            .setContentTitle(Settings.companion(ctx).title)
+            .setContentText(MoteVoice.callout(ctx))
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setColor(0xFF8FD47A.toInt())
+            .setColor(Settings.companion(ctx).color.toInt())
             .setOngoing(true)
             .setAutoCancel(true)
             .setTimeoutAfter(60_000)
             .setContentIntent(full)
             .setFullScreenIntent(full, true)
         val n = try {
-            b.setStyle(NotificationCompat.CallStyle.forIncomingCall(mote(), decline, answer)).build()
+            b.setStyle(NotificationCompat.CallStyle.forIncomingCall(mote(ctx), decline, answer)).build()
         } catch (e: Exception) {
             b.setStyle(null)
                 .addAction(0, "Later", decline)
@@ -137,10 +139,10 @@ object Notifier {
         val tap = PendingIntent.getActivity(ctx, 20, open, flags())
         val b = NotificationCompat.Builder(ctx, CH_NUDGES)
             .setSmallIcon(R.drawable.ic_stat_mote)
-            .setContentTitle("Mote")
-            .setContentText(MoteVoice.CALLOUT)
+            .setContentTitle(Settings.companion(ctx).title)
+            .setContentText(MoteVoice.callout(ctx))
             .setSubText("Tap to listen")
-            .setColor(0xFF8FD47A.toInt())
+            .setColor(Settings.companion(ctx).color.toInt())
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)

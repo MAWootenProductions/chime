@@ -26,16 +26,16 @@ class AlarmReceiver : BroadcastReceiver() {
                 if (key != null) Settings.markCalled(ctx, key)
                 if (q != null && !q.done) {
                     if (Settings.rings(ctx)) Notifier.ring(ctx, q)
-                    else Notifier.nudge(ctx, MoteVoice.forQuest(q), q)
+                    else Notifier.nudge(ctx, MoteVoice.forQuest(ctx, q), q)
                 }
                 Scheduler.rescheduleAll(ctx)
             }
             Scheduler.ACTION_FOLLOWUP -> {
                 if (key != null) Settings.markCalled(ctx, key)
-                if (q != null && !q.done) Notifier.nudge(ctx, MoteVoice.forQuest(q), q)
+                if (q != null && !q.done) Notifier.nudge(ctx, MoteVoice.forQuest(ctx, q), q)
             }
             Scheduler.ACTION_GENTLE -> {
-                val (msg, quest) = MoteVoice.gentle(QuestStore.all(ctx))
+                val (msg, quest) = MoteVoice.gentle(ctx, QuestStore.all(ctx))
                 if (QuestStore.all(ctx).any { !it.done }) Notifier.nudge(ctx, msg, quest)
                 Scheduler.scheduleGentle(ctx)
             }

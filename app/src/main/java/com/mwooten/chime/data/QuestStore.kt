@@ -86,6 +86,12 @@ object Settings {
     fun lead(ctx: Context): Int = p(ctx).getInt("lead", 10)
     fun setLead(ctx: Context, v: Int) = p(ctx).edit().putInt("lead", v).apply()
 
+    fun world(ctx: Context): String = p(ctx).getString("world", "PLAIN")!!
+    fun setWorld(ctx: Context, v: String) = p(ctx).edit().putString("world", v).apply()
+
+    fun companion(ctx: Context): Companion = Companion.byName(p(ctx).getString("companion", "WREN"))
+    fun setCompanion(ctx: Context, v: Companion) = p(ctx).edit().putString("companion", v.name).apply()
+
     fun rings(ctx: Context): Boolean = p(ctx).getBoolean("rings", true)
     fun setRings(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("rings", v).apply()
 

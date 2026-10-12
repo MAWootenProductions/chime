@@ -86,7 +86,7 @@ class CallActivity : ComponentActivity() {
                 onOpen = {
                     getSystemService(KeyguardManager::class.java).requestDismissKeyguard(this, null)
                     startActivity(Intent(this, MainActivity::class.java)
-                        .putExtra(Notifier.EXTRA_MESSAGE, q?.let { MoteVoice.forQuest(it) } ?: "That was just a test call. I'll ring like that whenever a quest comes due.")
+                        .putExtra(Notifier.EXTRA_MESSAGE, q?.let { MoteVoice.forQuest(this, it) } ?: "That was just a test call. I'll ring like that whenever a quest comes due.")
                         .putExtra(Notifier.EXTRA_QUEST, q?.id)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     finish()
@@ -110,6 +110,9 @@ private fun CallScreen(
     onAnswer: () -> Unit, onLater: () -> Unit,
     onDone: () -> Unit, onSnooze: () -> Unit, onOpen: () -> Unit, onClose: () -> Unit,
 ) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val who = com.mwooten.chime.data.Settings.companion(ctx)
+    val tint = Color(who.color)
     val clock = rememberClock()
     val pulse by rememberInfiniteTransition(label = "ring").animateFloat(0f, 1f,
         infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "rp")
@@ -119,21 +122,24 @@ private fun CallScreen(
             Spacer(Modifier.height(56.dp))
             Text(if (answered) "ON THE LINE" else "INCOMING", style = T.eyebrow.copy(color = C.mist, fontSize = 13.sp, letterSpacing = 4.sp))
             Spacer(Modifier.height(6.dp))
-            Text("Mote", style = T.logo.copy(fontSize = 54.sp))
+            Text(who.title, style = T.logo.copy(fontSize = 54.sp, color = Color(who.light)))
             Spacer(Modifier.height(18.dp))
             Canvas(Modifier.size(200.dp)) {
                 val t = clock.value
                 if (!answered) for (k in 0..2) {
                     val ph = ((t * 0.7f + k / 3f) % 1f)
-                    drawCircle(C.glow.copy(alpha = (1f - ph) * 0.35f), size.width * (0.2f + ph * 0.3f), center, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+                    drawCircle(tint.copy(alpha = (1f - ph) * 0.45f), size.width * (0.2f + ph * 0.3f), center, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
                 }
-                moteSprite(Offset(center.x, center.y + kotlin.math.sin(t * 4f) * 6f), if (answered) 1.5f else 1.4f + pulse * 0.15f, t, 1f + if (answered) 0f else pulse * 0.5f)
+                val cy = center.y + kotlin.math.sin(t * 4f) * 6f
+                val r = size.width * (if (answered) 0.2f else 0.2f + pulse * 0.03f)
+                drawCircle(androidx.compose.ui.graphics.Brush.radialGradient(listOf(tint.copy(alpha = .7f), Color.Transparent), Offset(center.x, cy), r * 2.4f), r * 2.4f, Offset(center.x, cy))
+                drawCircle(androidx.compose.ui.graphics.Brush.radialGradient(listOf(Color.White, Color(who.light), tint), Offset(center.x - r * .25f, cy - r * .3f), r * 1.2f), r, Offset(center.x, cy))
             }
             Spacer(Modifier.height(18.dp))
             AnimatedContent(answered, transitionSpec = { fadeIn(tween(400)) togetherWith fadeOut(tween(200)) }, label = "call") { ans ->
                 if (!ans) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(MoteVoice.CALLOUT, style = T.heading.copy(fontSize = 34.sp), textAlign = TextAlign.Center)
+                        Text(who.callout, style = T.heading.copy(fontSize = 34.sp), textAlign = TextAlign.Center)
                         Spacer(Modifier.height(8.dp))
                         Text(if (q != null) "About a quest due soon" else "A test call", style = T.small)
                     }
@@ -142,7 +148,7 @@ private fun CallScreen(
                         .background(Brush.verticalGradient(listOf(Color(0xFFF4EDD8), Color(0xFFE5DABB)))).padding(20.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         Text("MOTE SAYS", style = T.eyebrow.copy(color = Color(0xFF7C6A35)))
-                        Text(q?.let { MoteVoice.forQuest(it) } ?: "This is how I'll sound when a quest comes due. Answer, and I'll tell you what it is.", style = T.voice.copy(fontSize = 24.sp, lineHeight = 30.sp))
+                        Text(q?.let { who.line(it) } ?: "This is how I'll sound when a quest comes due. Answer, and I'll tell you what it is.", style = T.voice.copy(fontSize = 24.sp, lineHeight = 30.sp))
                     }
                 }
             }

@@ -69,7 +69,7 @@ fun LogScreen(
 
     Column(Modifier.fillMaxSize().systemBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Crumb("Title", true, onBack); Crumb("Spill", false, onSpill)
+            Crumb("Back", true, onBack); Crumb("Spill", false, onSpill)
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 140.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
