@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import com.mwooten.chime.R
@@ -41,6 +42,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
+import kotlin.random.Random
 
 /**
  * The bell: anything that saves or finishes a task "strikes" the drop. The drop ripples top to
@@ -101,12 +103,15 @@ fun Character(
     val curLevel by rememberUpdatedState(level)
     val curListening by rememberUpdatedState(listening)
     val tap by rememberUpdatedState(onTap)
+    val curWho by rememberUpdatedState(who)
+    var mt by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(Unit) {
         var last = withFrameNanos { it }
         while (true) {
             withFrameNanos { now ->
                 val dt = ((now - last) / 1e9f).coerceIn(0f, 0.05f); last = now
                 time += dt
+                mt += dt * moodOf(curWho).speed
                 chime = max(0f, chime - dt / 1.3f)
                 lvl += ((if (curListening) max(curLevel, 0.1f) else 0f) - lvl) * 0.3f
                 hear += ((if (curListening) 1f else 0f) - hear) * 0.2f
@@ -122,10 +127,19 @@ fun Character(
         }
     } else Modifier
 
-    Canvas(Modifier.size(size).pointerInput(Unit) { detectTapGestures(onTap = { tap() }) }.then(drag)) {
-        val h = this.size.height
+    val mood = moodOf(who)
+    Canvas(Modifier.size(size)
+        .graphicsLayer { alpha = if (mood.flicker && sin(time * 7f) > .93f) .55f else 1f }
+        .pointerInput(Unit) { detectTapGestures(onTap = { tap() }) }.then(drag)) {
+        val w = this.size.width; val h = this.size.height
+        // personality motion on top of the look's own float: Pip hops, Blaze can't sit still, Dim shrinks
+        val hop = if (who == Companion.PIP) -abs(sin(time * 3f)) * h * .05f else 0f
+        val jit = if (mood.jitter > 0f) mood.jitter * w / 300f else 0f
+        val jx = if (jit > 0f) (Random.nextFloat() - .5f) * jit else 0f
+        val jy = if (jit > 0f) (Random.nextFloat() - .5f) * jit else 0f
+        translate(jx, hop + jy) { scale(mood.size, mood.size, pivot = Offset(w / 2f, h * .5f)) {
         val p = Pose(
-            t = time, k = chime, who = who, listening = curListening, lvl = lvl,
+            t = mt, k = chime, who = who, listening = curListening, lvl = lvl,
             grow = 1f + hear * (.08f + lvl * .12f),
             dx = px, dy = py + hear * h * .02f,
             flapBoost = 1f + hear * .5f,
@@ -138,7 +152,25 @@ fun Character(
             Look.BUBBLE -> drawBubble(p, tone)
             Look.PUFF -> drawPuff(p, tone)
         }
+        } }
     }
+}
+
+/** How each personality carries itself: time speed, jitter (px at 300 wide), size, flicker. */
+private class Mood(val speed: Float, val jitter: Float, val size: Float, val flicker: Boolean)
+
+private val MoodWren = Mood(1f, 0f, 1f, false)
+private val MoodFizz = Mood(.75f, 0f, 1f, false)
+private val MoodPip = Mood(1.6f, 0f, 1f, false)
+private val MoodDim = Mood(.7f, 0f, .86f, true)
+private val MoodBlaze = Mood(1.3f, 2.2f, 1.05f, false)
+
+private fun moodOf(c: Companion): Mood = when (c) {
+    Companion.WREN -> MoodWren
+    Companion.FIZZ -> MoodFizz
+    Companion.PIP -> MoodPip
+    Companion.DIM -> MoodDim
+    Companion.BLAZE -> MoodBlaze
 }
 
 /* ---------------- drawing (ported from the colors preview) ---------------- */
